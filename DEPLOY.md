@@ -22,8 +22,9 @@ on your laptop every time. Options are ordered from easiest → most flexible.
 1. The repo must contain `app.py`, `requirements.txt`, and a `.env.example` (no real `.env`).
 2. **Never commit `.env`** — confirm `.env` is in `.gitignore`. Real keys go into the host's
    secrets/environment-variables UI.
-3. Make sure `app.py` ends with `build_ui().launch(...)`. For hosted servers add
-   `server_name="0.0.0.0"` and respect the host's `PORT` env var (see per-host notes below).
+3. `app.py` already binds to `server_name="0.0.0.0"`, honors `os.environ["PORT"]`, enables
+   `demo.queue(...)`, and sets `ssr_mode=False`. No host-specific tweaks are needed for HF
+   Spaces, Render, Railway, Fly, Cloud Run, or a VPS.
 4. Push everything to a public or private GitHub repo — most hosts pull from there.
 
 ---
@@ -52,11 +53,13 @@ Free tier gives an always-on CPU container. Native Gradio support.
    colorTo: blue
    sdk: gradio
    sdk_version: "6.0.0"     # match the gradio version in requirements.txt
+   python_version: "3.11"   # pin runtime; matches local venv
    app_file: app.py
    pinned: false
+   license: mit
    ---
    ```
-   (Spaces uses this to pick the runtime.)
+   (Spaces uses this to pick the runtime. The repo's `README.md` already contains this block.)
 5. Push:
    ```bash
    git add . && git commit -m "Initial deploy" && git push
@@ -72,9 +75,10 @@ Free tier gives an always-on CPU container. Native Gradio support.
 - The free CPU tier has limited memory; if PyTorch / sentence-transformers ship transitively and
   OOM you, trim `requirements.txt` to the runtime essentials only (see "Minimal requirements"
   below).
-- Spaces auto-injects an env var `PORT` and runs `python app.py`. Your existing `launch()` call
-  works as-is.
-- Updates: just `git push` to the Space repo — auto-rebuild kicks in.
+- Spaces auto-injects an env var `PORT` and runs `python app.py`. `app.py` already reads `PORT`,
+  binds to `0.0.0.0`, calls `demo.queue(...)`, and sets `ssr_mode=False` (SSR breaks Gradio
+  streaming generators on HF) — no changes required.
+- Updates: just `git push hf main` to the Space remote — auto-rebuild kicks in.
 
 ---
 
@@ -92,16 +96,7 @@ Free tier sleeps after 15 min of inactivity (~30s cold start). Paid `$7/mo` Star
    - **Start command:** `python app.py`
    - **Instance type:** Free (or Starter for always-on)
 4. **Environment → Add Environment Variable**: `OPENAI_API_KEY`, `XAI_API_KEY`.
-5. Edit `app.py`'s `launch()` to read Render's port:
-   ```python
-   build_ui().launch(
-       server_name="0.0.0.0",
-       server_port=int(os.environ.get("PORT", 7860)),
-       theme=...,
-       css=CSS,
-       head=MATHJAX_HEAD,
-   )
-   ```
+5. `app.py` already binds to `0.0.0.0` and reads `$PORT` — no edits needed.
 6. Click **Deploy**. URL appears under the service page.
 
 ---
@@ -116,8 +111,8 @@ railway up          # builds + deploys
 railway variables set OPENAI_API_KEY=sk-... XAI_API_KEY=xai-...
 ```
 
-Railway auto-detects Python from `requirements.txt`. Same `launch()` tweak as Render
-(`server_name="0.0.0.0"`, `server_port=PORT`).
+Railway auto-detects Python from `requirements.txt`. `app.py` already binds to `0.0.0.0` and
+reads `$PORT` — no edits needed.
 
 ---
 
@@ -279,38 +274,34 @@ gcloud run deploy arxiv-carousel \
 
 ---
 
-## Required `app.py` tweak for hosted servers
+## Hosted-server launch settings (already wired in `app.py`)
 
-Hosted platforms (Render, Railway, Fly, Cloud Run, VPS) expect the app to bind to `0.0.0.0` and
-to honor a `$PORT` env var. Replace the bottom of `app.py`:
+The bottom of `app.py` already sets everything hosted platforms need:
 
 ```python
 if __name__ == "__main__":
-    build_ui().launch(
+    demo = build_ui()
+    demo.queue(default_concurrency_limit=2, max_size=20)
+    demo.launch(
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", 7860)),
-        theme=gr.themes.Soft(
-            text_size=gr.themes.sizes.text_lg,
-            font=[
-                gr.themes.GoogleFont("Inter"),
-                "system-ui", "-apple-system", "Segoe UI",
-                "Helvetica Neue", "Arial", "sans-serif",
-            ],
-        ),
+        ssr_mode=False,  # SSR breaks streaming generators on HF Spaces
+        theme=gr.themes.Soft(...),
         css=CSS,
         head=MATHJAX_HEAD,
     )
 ```
 
-Hugging Face Spaces is the exception — it injects `server_name="0.0.0.0"` and a port for you, so
-the unmodified `build_ui().launch(...)` works.
+- `server_name="0.0.0.0"` — required by Render, Railway, Fly, Cloud Run, VPS.
+- `os.environ["PORT"]` — Render/Railway/Fly/HF inject this; fallback `7860` for local dev.
+- `demo.queue(...)` — required for Gradio streaming generators and caps concurrency.
+- `ssr_mode=False` — disables server-side rendering, which silently breaks streaming on HF Spaces.
 
 ---
 
-## Minimal `requirements.txt` (for resource-tight hosts)
+## `requirements.txt`
 
-The current `requirements.txt` carries a few leftover libs from the earlier RAG pipeline. If
-you're memory-constrained on the free tier of any host, trim to the runtime essentials:
+Already trimmed to the runtime essentials — safe for resource-tight free tiers:
 
 ```text
 gradio>=6.0.0
@@ -321,9 +312,7 @@ pymupdf>=1.24.0
 python-dotenv>=1.0.0
 ```
 
-(Drop `faiss-cpu`, `sentence-transformers`, `torch`, `langchain-huggingface`,
-`langchain-classic`, `langchain-text-splitters`, `langchain-community` — none are imported in
-the current minimalist app.)
+No `torch`, `faiss-cpu`, `sentence-transformers`, or `langchain-community` — none are imported.
 
 ---
 
@@ -355,9 +344,9 @@ The app pays per request via your OpenAI / xAI keys. To cap exposure on a public
 2. Enable hard usage limits at the provider:
    - OpenAI: <https://platform.openai.com/account/limits> → Monthly budget.
    - xAI:    <https://console.x.ai/> → API key spending limits.
-3. Add Gradio queuing to throttle concurrent runs:
+3. Tighten the concurrency cap (`app.py` ships with `default_concurrency_limit=2, max_size=20`):
    ```python
-   build_ui().queue(default_concurrency_limit=1, max_size=10).launch(...)
+   demo.queue(default_concurrency_limit=1, max_size=10)
    ```
 4. Add basic auth (see above) so only you / invited users can hit it.
 
