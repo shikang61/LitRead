@@ -975,6 +975,7 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", 7860)),
+        ssr_mode=False,  # SSR breaks streaming generators on HF Spaces
         theme=gr.themes.Soft(
             text_size=gr.themes.sizes.text_lg,
             font=[
