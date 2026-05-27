@@ -986,10 +986,18 @@ if __name__ == "__main__":
     demo = build_ui()
     # Streaming generators require a queue. HF Spaces also expects 0.0.0.0 + $PORT.
     demo.queue(default_concurrency_limit=2, max_size=20)
+
+    # Optional basic-auth gate. Set APP_USER + APP_PASS as Space secrets to require
+    # a login prompt; leave unset for an open deployment.
+    app_user = os.environ.get("APP_USER", "").strip()
+    app_pass = os.environ.get("APP_PASS", "").strip()
+    auth = (app_user, app_pass) if app_user and app_pass else None
+
     demo.launch(
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", 7860)),
         ssr_mode=False,  # SSR breaks streaming generators on HF Spaces
+        auth=auth,
         theme=gr.themes.Soft(
             text_size=gr.themes.sizes.text_lg,
             font=[
