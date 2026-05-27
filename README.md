@@ -22,14 +22,17 @@ OpenAI or Grok via LangChain, served through a minimalist Gradio web UI.
 
 - 🔗 **Paste any ArXiv URL or ID** — `https://arxiv.org/abs/2305.10601`, `2305.10601v3`, or `cs.LG/0701001`.
 - 🃏 **Carousel cards** — one card per aspect (Motivation, Context, Proposed Solution, How It Works,
-  Comparison, Future Work) with a 1-line framing sentence + 2–4 punchy bullets.
+  Key Results, Comparison, Future Work) with a 1-line framing sentence + 2–4 punchy bullets.
 - ✍️ **Layman language** — captivating, jargon-light tone with key technical terms bolded.
 - ➗ **Math rendering** — LaTeX via MathJax (`$inline$`, `$$display$$`).
 - 🔄 **Live timers** — fetch + generation elapsed time tick every 0.3s.
 - 🪙 **API cost panel** — input/output token counts and estimated USD cost per run.
+- 📥 **Export as PNG** — one-click client-side capture of the rendered card grid (html2canvas).
+- 📚 **Export to Zotero** — auto-generated `.bib` download; one-click `Open PDF` / `ArXiv Page` links.
 - 🛡 **HTTP 429 retry** — auto-retries arxiv rate-limit responses with countdown.
-- 🌐 **Provider-flexible** — OpenAI (`gpt-5.4` default) or Grok (`grok-4.3` default) via the same
+- 🌐 **Provider-flexible** — Grok (`grok-4.3` default) or OpenAI (`gpt-5.4`) via the same
   `ChatOpenAI` client (Grok uses the OpenAI-compatible xAI base URL).
+- 🚦 **Bounded concurrency** — Gradio queue caps in-flight runs (`default_concurrency_limit=2`).
 - 🔐 **`.env` config** — no API-key input box in the UI; keys live in `.env` or shell env vars.
 
 ## Tech stack
@@ -42,6 +45,7 @@ OpenAI or Grok via LangChain, served through a minimalist Gradio web UI.
 | PDF text extract | `pymupdf` (`fitz`)                   |
 | Env loader       | `python-dotenv`                      |
 | Math rendering   | MathJax 3 (CDN, client-side)         |
+| PNG export       | html2canvas (CDN, client-side)       |
 
 ## Quick start
 
@@ -129,10 +133,10 @@ model's context window + your wallet).
 |---------------------------------------------------|--------------------------------------------------------------------------|
 | `Config`                                          | Model IDs, pricing, paper-size cap, retry budget                         |
 | `System prompt`                                   | The carousel JSON schema and rules sent to the LLM                       |
-| `Helpers`                                         | URL parser, ArXiv loader, LLM factory, cost estimator                    |
-| `HTML renderers`                                  | Paper-header, cards, hook, cost panel, error/placeholder blocks          |
+| `Helpers`                                         | URL parser, ArXiv loader, LLM factory, cost estimator, BibTeX builder    |
+| `HTML renderers`                                  | Paper-header, action row, cards, hook, cost panel, error/placeholder     |
 | `Main callback — generate_carousel`              | The streaming generator wired to the Generate button                     |
-| `UI`                                              | Gradio Blocks layout + CSS + MathJax loader                              |
+| `UI`                                              | Gradio Blocks layout + CSS + MathJax + html2canvas PNG-export loader     |
 
 ### Pipeline at a glance
 
@@ -184,6 +188,18 @@ This preserves LaTeX while still parsing.
 
 MathJax 3 is loaded from CDN in the page `<head>`. A small DOM observer re-typesets the `#output`
 container whenever Gradio re-renders the card HTML.
+
+### PNG export
+
+`html2canvas` is loaded from CDN alongside MathJax. The `📥 Export as PNG` button calls
+`exportCardsToPng()`, which hides the action row, snapshots `#output` at 2× scale, and triggers a
+browser download of `arxiv-carousel.png`. Fully client-side — no server round-trip.
+
+### BibTeX / Zotero export
+
+`make_bibtex()` builds an arXiv-style `@article{…}` entry from the paper metadata, base64-encodes
+it into a `data:application/x-bibtex` link, and exposes it as a one-click `.bib` download. Zotero's
+"Import from clipboard / file" recognises the format and auto-fills all fields.
 
 ## Troubleshooting
 
