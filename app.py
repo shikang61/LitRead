@@ -101,8 +101,10 @@ RULES:
 - Use ONLY information from the paper text. Never invent facts.
 - Each `body`: ONE short sentence (max ~20 words) — a framing line, not a full explanation.
 - Each `bullets`: 2–4 punchy bullets (max ~12 words each). Use bullets to carry the substance.
-- Wrap KEY technical terms in markdown bold: `**term**`. Bold sparingly (1–3 per bullet/body) —
-  only the most important concept, method name, or metric. Do not bold whole phrases.
+- **MANDATORY bold formatting** — every `body` and every bullet MUST wrap 1–2 key technical
+  terms in markdown bold using DOUBLE asterisks: `**term**`. Pick the most important concept,
+  method name, dataset, model, or metric in each line. Do NOT bold whole phrases — single
+  terms only. Example bullet: `"Beats **GPT-4** by **+15.2 pp** on **MMLU**"`.
 - Layman language. Define jargon briefly when unavoidable. Captivating tone.
 - `bullets` is optional — omit if a single short sentence in `body` covers the slide cleanly.
 - Output ONLY the JSON object — no prose before/after, no markdown fences.
@@ -698,7 +700,19 @@ CSS = """
 #generate-row { justify-content: center; margin-top: 1em; gap: 0.6em; }
 
 /* ---- Status + output ---- */
-#status { max-width: 1100px; margin: 1.5em auto 0.5em auto; text-align: center; }
+#status {
+    width: fit-content;
+    max-width: 1100px;
+    margin: 1.5em auto 0.5em auto;
+    padding: 0.5em 1.2em 0.7em 1.2em;
+    text-align: center;
+}
+#status .prose,
+#status .prose * {
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1.2 !important;
+}
 #output { max-width: 1100px; margin: 0 auto 3em auto; }
 
 /* ---- Paper meta ---- */
