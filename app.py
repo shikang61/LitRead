@@ -857,6 +857,12 @@ CSS = """
 
 
 MATHJAX_HEAD = r"""
+<link rel="icon" type="image/png" sizes="32x32" href="/gradio_api/file=static/favicon-32.png">
+<link rel="apple-touch-icon" sizes="192x192" href="/gradio_api/file=static/icon-192.png">
+<link rel="manifest" href="/gradio_api/file=static/manifest.webmanifest">
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LitRead">
 <script>
 window.MathJax = {
   tex: {
@@ -930,11 +936,11 @@ window.exportCardsToPng = async function() {
 def build_ui() -> gr.Blocks:
     initial_cost = render_cost_html(list(PROVIDERS.values())[0]["model"])
 
-    with gr.Blocks(title="ArXiv Carousel") as demo:
+    with gr.Blocks(title="LitRead") as demo:
         # ---- Top bar: title left, [Model + API Usage] stacked top-right ----
         with gr.Row(elem_id="topbar"):
             with gr.Column(scale=4):
-                gr.Markdown("# 📚 ArXiv Carousel")
+                gr.Markdown("# 📚 LitRead")
             with gr.Column(scale=1, min_width=260, elem_id="right-stack"):
                 provider = gr.Dropdown(
                     choices=list(PROVIDERS.keys()),
@@ -990,6 +996,8 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", 7860)),
         ssr_mode=False,  # SSR breaks streaming generators on HF Spaces
+        favicon_path="static/favicon-32.png",
+        allowed_paths=["static"],
         theme=gr.themes.Soft(
             text_size=gr.themes.sizes.text_lg,
             font=[

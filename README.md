@@ -1,5 +1,5 @@
 ---
-title: ArXiv Carousel
+title: LitRead
 emoji: 📚
 colorFrom: indigo
 colorTo: blue
@@ -11,7 +11,7 @@ pinned: false
 license: mit
 ---
 
-# 📚 ArXiv Carousel
+# 📚 LitRead
 
 Paste an ArXiv link, get a captivating bite-sized summary rendered as a card grid. Powered by
 OpenAI or Grok via LangChain, served through a minimalist Gradio web UI.
