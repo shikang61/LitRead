@@ -969,7 +969,12 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_ui().launch(
+    demo = build_ui()
+    # Streaming generators require a queue. HF Spaces also expects 0.0.0.0 + $PORT.
+    demo.queue(default_concurrency_limit=2, max_size=20)
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", 7860)),
         theme=gr.themes.Soft(
             text_size=gr.themes.sizes.text_lg,
             font=[
