@@ -686,7 +686,7 @@ CSS = """
 /* ---- Centered Google-style URL bar ---- */
 #center-stack {
     display: flex; flex-direction: column; align-items: center;
-    margin: 3em auto 1em auto; max-width: 1100px; width: 100%;
+    margin: 0.5em auto 1em auto; max-width: 1100px; width: 100%;
 }
 #tagline { color: #555; margin-bottom: 1.4em; font-size: 1.5em; text-align: center; font-weight: 500; }
 #url-box textarea {
