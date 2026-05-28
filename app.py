@@ -1004,35 +1004,68 @@ CSS = """
 .cost-bar-amber { background: #f59e0b; }
 .cost-bar-red   { background: #ef4444; }
 
-/* ---- Recent papers chip row (sits above URL bar) ---- */
-.recent-row {
-    display: flex; flex-wrap: wrap; align-items: center;
-    gap: 0.5em;
-    margin: 0 0 1em 0;
-    min-height: 0;
+/* ---- Recent papers (left rail sidebar) ---- */
+#recent-papers {
+    position: fixed;
+    top: 90px;
+    left: 0;
+    width: 240px;
+    max-height: calc(100vh - 110px);
+    overflow-y: auto;
+    padding: 1em 0.9em 1em 1em;
+    z-index: 10;
 }
-.recent-label {
-    color: #6b7280;
-    font-size: 0.9em;
-    font-weight: 500;
-    margin-right: 0.2em;
-}
-.recent-chip {
-    display: inline-flex; align-items: center;
-    padding: 0.35em 0.75em;
-    border: 1px solid #e5e7eb;
-    background: #fff;
-    border-radius: 999px;
+.recent-header {
     font-size: 0.85em;
-    color: #4b5563;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.6em;
+    padding-left: 0.2em;
+}
+.recent-empty-msg {
+    font-size: 0.8em;
+    color: #9ca3af;
+    padding: 0.4em 0.2em;
+    line-height: 1.4;
+}
+.recent-list { display: flex; flex-direction: column; gap: 0.25em; }
+.recent-item {
+    text-align: left;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0.55em 0.7em;
     cursor: pointer;
     font-family: inherit;
-    max-width: 100%;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    width: 100%;
+    transition: background 0.15s, border-color 0.15s;
 }
-.recent-chip:hover {
-    background: #eef2ff; border-color: #6366f1; color: #4338ca;
+.recent-item:hover { background: #eef2ff; border-color: #6366f1; }
+.recent-title {
+    font-size: 0.9em;
+    color: #1f2937;
+    font-weight: 500;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.recent-aid {
+    font-size: 0.72em;
+    color: #9ca3af;
+    margin-top: 0.2em;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
+}
+/* Push main content right of the sidebar on wide screens. */
+@media (min-width: 1100px) {
+    .gradio-container { padding-left: 270px !important; }
+}
+/* Hide sidebar on narrow screens — falls back to no recents UI. */
+@media (max-width: 1099px) {
+    #recent-papers { display: none; }
 }
 img.recent-push { width: 0; height: 0; }
 
@@ -1245,16 +1278,27 @@ window.LITREAD_RECENT = {
     var box = document.getElementById('recent-papers');
     if (!box) return;
     var arr = this.read();
-    if (!arr.length) { box.innerHTML = ''; return; }
-    var html = '<div class="recent-row"><span class="recent-label">Recent:</span>';
-    arr.forEach(function(e) {
-      var t = (e.title || e.aid).replace(/[<>&"']/g, function(c) {
+    var esc = function(s) {
+      return String(s || '').replace(/[<>&"']/g, function(c) {
         return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c];
       });
+    };
+    if (!arr.length) {
+      box.innerHTML = '<div class="recent-empty">' +
+        '<div class="recent-header">Recent</div>' +
+        '<div class="recent-empty-msg">Papers you generate appear here.</div>' +
+        '</div>';
+      return;
+    }
+    var html = '<div class="recent-header">Recent</div><div class="recent-list">';
+    arr.forEach(function(e) {
       var aSafe = e.aid.replace(/'/g, "\\'");
-      html += '<button type="button" class="recent-chip" title="' + t +
-        '" onclick="window.LITREAD_RECENT.load(\'' + aSafe + '\')">' +
-        e.aid + '</button>';
+      html += '<button type="button" class="recent-item" ' +
+        'title="' + esc(e.title) + '\\n' + esc(e.aid) + '" ' +
+        'onclick="window.LITREAD_RECENT.load(\'' + aSafe + '\')">' +
+        '<div class="recent-title">' + esc(e.title || e.aid) + '</div>' +
+        '<div class="recent-aid">' + esc(e.aid) + '</div>' +
+        '</button>';
     });
     html += '</div>';
     box.innerHTML = html;
@@ -1320,6 +1364,10 @@ def build_ui() -> gr.Blocks:
     initial_cost = render_cost_html(list(PROVIDERS.values())[0]["model"])
 
     with gr.Blocks(title="LitRead") as demo:
+        # Left rail — JS reads localStorage and renders a stacked list of
+        # recent paper titles. Hidden on narrow screens via media query.
+        gr.HTML(value="", elem_id="recent-papers")
+
         # ---- Top bar: title left, [Model + API Usage] stacked top-right ----
         with gr.Row(elem_id="topbar"):
             with gr.Column(scale=4):
@@ -1351,9 +1399,6 @@ def build_ui() -> gr.Blocks:
             )
             with gr.Row(elem_id="generate-row"):
                 generate_btn = gr.Button("✨ Generate Carousel", variant="primary")
-            # Container populated by JS reading localStorage on page load and
-            # after each <img class="recent-push"> mount.
-            gr.HTML(value="", elem_id="recent-papers")
 
         status = gr.Markdown("_Ready._", elem_id="status")
         output = gr.HTML(value="", elem_id="output")
