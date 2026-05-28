@@ -9,6 +9,7 @@ Pipeline:
 """
 
 import base64
+import hashlib
 import html
 import json
 import os
@@ -51,11 +52,24 @@ GROK_BASE_URL = "https://api.x.ai/v1"
 MAX_PAPER_CHARS = 200_000
 MAX_FETCH_RETRIES = 4
 
+# Bump this whenever CAROUSEL_PROMPT changes — invalidates cached carousels.
+PROMPT_VERSION = "v3"
+
+# Cache dir for arxiv_id+prompt_version → carousel JSON. Use /data on HF Spaces
+# with persistent storage; falls back to local ./cache otherwise.
+CACHE_DIR = os.environ.get("LITREAD_CACHE_DIR", "cache")
+
 # Per-1M-token pricing in USD. Update with real numbers when you have them.
 # Cost = (in_tok * input + out_tok * output) / 1_000_000
 PRICING: Dict[str, Dict[str, float]] = {
     "gpt-5.4":  {"input": 5.00, "output": 15.00},
     "grok-4.3": {"input": 5.00, "output": 15.00},
+}
+
+# Context-window sizes (input tokens). Used by the cost panel meter.
+MODEL_CONTEXT: Dict[str, int] = {
+    "gpt-5.4":  400_000,
+    "grok-4.3": 256_000,
 }
 
 PROVIDERS = {
@@ -148,7 +162,7 @@ CARD STRUCTURE:
 - `bullets` is optional — omit if a single short sentence in `body` covers the slide cleanly.
 
 FORMATTING:
-- **MANDATORY bold** — every `body` and every bullet MUST wrap at least 3 key terms in markdown bold
+- **MANDATORY bold** — every `body` and every bullet MUST wrap at least 4 key terms in markdown bold
   using DOUBLE asterisks: `**term**`. Pick the most important concept, method name, dataset,
   model, or metric in each line. Do NOT bold whole phrases — single terms only.
   Example bullet: `"Beats **GPT-4** by **+15.2 pp** on **MMLU**"`.
@@ -178,6 +192,23 @@ def extract_arxiv_id(text: str) -> Optional[str]:
     return m.group("id") if m else None
 
 
+_REFERENCES_HEADER_RE = re.compile(
+    r"(?im)^\s*(references|bibliography|acknowledg(?:e?)ments)\s*$"
+)
+
+
+def strip_references(text: str) -> str:
+    """Cut the references/bibliography tail. Preserves >=40% of doc to avoid
+    chopping a mid-paper section header by accident."""
+    matches = list(_REFERENCES_HEADER_RE.finditer(text))
+    if not matches:
+        return text
+    cut = matches[-1].start()
+    if cut < len(text) * 0.4:
+        return text
+    return text[:cut].rstrip()
+
+
 def load_arxiv_paper(arxiv_id: str) -> List[Document]:
     # delay_seconds=0.5 (down from arxiv default 3.0) + num_retries=2 keeps the metadata
     # round-trip under ~2s when arxiv is healthy; backoff still handled by generate_carousel.
@@ -194,6 +225,8 @@ def load_arxiv_paper(arxiv_id: str) -> List[Document]:
         page_count = pdf.page_count
         # "text" extraction mode is fastest; skips layout/HTML reconstruction.
         text = "\n\n".join(page.get_text("text") for page in pdf)
+    # References list eats ~10-25% of tokens and the LLM can't summarise from it.
+    text = strip_references(text)
 
     names = [a.name for a in result.authors]
     if not names:
@@ -248,6 +281,33 @@ def estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
     return (in_tok * p["input"] + out_tok * p["output"]) / 1_000_000
 
 
+# ---- Carousel cache (arxiv_id + provider + model + prompt_version -> JSON) ----
+def cache_key(arxiv_id: str, provider: str, model: str) -> str:
+    raw = f"{arxiv_id}|{provider}|{model}|{PROMPT_VERSION}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def cache_get(key: str) -> Optional[Dict[str, Any]]:
+    path = os.path.join(CACHE_DIR, f"{key}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def cache_put(key: str, payload: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        path = os.path.join(CACHE_DIR, f"{key}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception:
+        pass  # cache is best-effort; a write failure must never break the run
+
+
 # ---- JSON parser tolerant of code fences, surrounding prose, bad escapes ---
 # Valid JSON string escapes are \\ \" \/ \b \f \n \r \t \uXXXX. Anything else
 # (e.g. \( \$ \% from LaTeX) is illegal. LLMs sometimes emit those — strip the
@@ -255,15 +315,65 @@ def estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
 _INVALID_ESC_RE = re.compile(r'\\([^\\"/bfnrtu])')
 
 
+def _normalise_quotes(t: str) -> str:
+    """Replace smart/curly quotes the LLM occasionally emits with ASCII."""
+    return (
+        t.replace("“", '"').replace("”", '"')
+         .replace("‘", "'").replace("’", "'")
+    )
+
+
+def _repair_truncated(t: str) -> str:
+    """Close unterminated strings/objects/arrays so json.loads parses the prefix.
+
+    Walks the buffer, tracks bracket depth + in-string state, then appends the
+    missing closers. Lets us render partial carousels during streaming and
+    salvage truncated final outputs.
+    """
+    s = t.rstrip()
+    in_string = False
+    escape = False
+    stack: List[str] = []
+    for ch in s:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "]}" and stack and stack[-1] == ch:
+            stack.pop()
+    suffix = ""
+    if in_string:
+        suffix += '"'
+    end = s
+    while end.endswith(","):
+        end = end[:-1]
+    return end + suffix + "".join(reversed(stack))
+
+
 def parse_carousel_json(text: str) -> Dict[str, Any]:
     """Tolerant JSON parser. Tries several common LLM-mistake fixes before giving up."""
-    s = text.strip()
+    s = _normalise_quotes(text.strip())
     fenced = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", s, re.DOTALL)
     if fenced:
         s = fenced.group(1)
-    first, last = s.find("{"), s.rfind("}")
-    if first != -1 and last != -1 and last > first:
+    first = s.find("{")
+    last = s.rfind("}")
+    if first != -1 and last > first:
         s = s[first : last + 1]
+    elif first != -1:
+        # No closing brace yet (streaming mid-output) — keep from first { onward.
+        s = s[first:]
 
     def _fix_escapes(t: str) -> str:
         # Double up invalid backslash escapes (\(, \$, \%, ...) so JSON parses
@@ -278,6 +388,8 @@ def parse_carousel_json(text: str) -> Dict[str, Any]:
         _fix_escapes(s),
         _strip_trailing_commas(s),
         _strip_trailing_commas(_fix_escapes(s)),
+        _repair_truncated(s),
+        _repair_truncated(_strip_trailing_commas(_fix_escapes(s))),
     ]
     last_err: Optional[Exception] = None
     for cand in candidates:
@@ -288,14 +400,80 @@ def parse_carousel_json(text: str) -> Dict[str, Any]:
     raise last_err if last_err else json.JSONDecodeError("no candidate", s, 0)
 
 
+def try_partial_parse(text: str) -> Optional[Dict[str, Any]]:
+    """Same as parse_carousel_json but returns None on failure (for streaming)."""
+    try:
+        return parse_carousel_json(text)
+    except Exception:
+        return None
+
+
 # ---- HTML renderers --------------------------------------------------------
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 
 
-def escape_with_bold(text: str) -> str:
-    """HTML-escape, then convert `**term**` → `<strong>term</strong>`."""
-    escaped = html.escape(text)
-    return _BOLD_RE.sub(r"<strong>\1</strong>", escaped)
+def escape_with_bold(text: str, snippets: Optional[Dict[str, str]] = None) -> str:
+    """HTML-escape, then convert `**term**` → `<strong>term</strong>`.
+
+    If `snippets[term]` exists, attach it as a `title=` attribute so hovering
+    the bolded term in the browser pops a tooltip with the paper-text snippet.
+    """
+    parts: List[str] = []
+    last = 0
+    for m in _BOLD_RE.finditer(text):
+        parts.append(html.escape(text[last:m.start()]))
+        term = m.group(1)
+        snip = (snippets or {}).get(term.strip())
+        if snip:
+            parts.append(
+                f'<strong class="cite" title="{html.escape(snip[:320])}">'
+                f'{html.escape(term)}</strong>'
+            )
+        else:
+            parts.append(f'<strong>{html.escape(term)}</strong>')
+        last = m.end()
+    parts.append(html.escape(text[last:]))
+    return "".join(parts)
+
+
+def extract_snippets(
+    slides: List[Dict[str, Any]],
+    paper_text: str,
+    hook: str = "",
+) -> Dict[str, str]:
+    """For every bolded term in hook/body/bullets, find its first occurrence in
+    the paper text and return ±100 chars of surrounding context."""
+    terms = set()
+
+    def collect(s: str) -> None:
+        for m in _BOLD_RE.finditer(s or ""):
+            term = m.group(1).strip()
+            if 2 <= len(term) <= 60:
+                terms.add(term)
+
+    collect(hook)
+    for slide in slides:
+        collect(str(slide.get("body", "")))
+        for b in slide.get("bullets") or []:
+            collect(str(b))
+
+    snippets: Dict[str, str] = {}
+    text_lower = paper_text.lower()
+    for term in terms:
+        idx = text_lower.find(term.lower())
+        if idx < 0:
+            continue
+        start = max(0, idx - 100)
+        end = min(len(paper_text), idx + len(term) + 100)
+        # Single-line, collapse internal whitespace; PDF text is full of \n.
+        snippet = re.sub(r"\s+", " ", paper_text[start:end]).strip()
+        # Bracket prefix/suffix when we've trimmed.
+        if start > 0:
+            snippet = "…" + snippet
+        if end < len(paper_text):
+            snippet = snippet + "…"
+        snippets[term] = snippet
+    return snippets
 
 
 def make_bibtex(arxiv_id: str, title: str, authors_all: List[str], year: int, abs_url: str) -> str:
@@ -353,11 +531,15 @@ def render_paper_header_html(
         parts.append(f'<p><strong>Published:</strong> {html.escape(published)}</p>')
     if pages:
         parts.append(f'<p><strong>Pages scanned:</strong> {pages}</p>')
+    parts.append("</div>")
     if truncated:
         parts.append(
-            f'<p class="warn">⚠️ Paper truncated to {MAX_PAPER_CHARS:,} chars.</p>'
+            f'<div class="trunc-banner">'
+            f'<span class="trunc-icon">⚠️</span>'
+            f'<span><strong>Paper truncated to {MAX_PAPER_CHARS:,} characters</strong> '
+            f'before sending to the model. Tail content (later sections) was not summarised.'
+            f'</span></div>'
         )
-    parts.append("</div>")
     return "".join(parts)
 
 
@@ -366,12 +548,13 @@ def render_cards_html(
     hook: str,
     slides: List[Dict[str, Any]],
     actions_html: str = "",
+    snippets: Optional[Dict[str, str]] = None,
 ) -> str:
     parts = [header_html]
     if actions_html:
         parts.append(actions_html)
     if hook:
-        parts.append(f'<div class="hook">{escape_with_bold(hook)}</div>')
+        parts.append(f'<div class="hook">{escape_with_bold(hook, snippets)}</div>')
     parts.append('<div class="card-grid">')
     for slide in slides:
         emoji = html.escape(str(slide.get("emoji", "🎠")))
@@ -386,10 +569,10 @@ def render_cards_html(
             f'<h3>{title}</h3>',
         ]
         if body:
-            card_inner.append(f'<p>{escape_with_bold(body)}</p>')
+            card_inner.append(f'<p>{escape_with_bold(body, snippets)}</p>')
         if bullets:
             items = "".join(
-                f'<li>{escape_with_bold(str(b).strip())}</li>'
+                f'<li>{escape_with_bold(str(b).strip(), snippets)}</li>'
                 for b in bullets
                 if str(b).strip()
             )
@@ -403,11 +586,27 @@ def render_cards_html(
 
 def render_cost_html(model: str = "—", in_tok: int = 0, out_tok: int = 0) -> str:
     cost = estimate_cost(model, in_tok, out_tok)
+    cap = MODEL_CONTEXT.get(model)
+    if cap:
+        pct = max(0, min(100, int(in_tok / cap * 100))) if in_tok else 0
+        # Colour the bar amber >70% / red >90% so over-budget runs are visible.
+        bar_class = "cost-bar"
+        if pct >= 90:
+            bar_class += " cost-bar-red"
+        elif pct >= 70:
+            bar_class += " cost-bar-amber"
+        input_row = (
+            f'<div class="cost-row"><span>Input</span>'
+            f'<span>{in_tok:,} / {cap:,} tok</span></div>'
+            f'<div class="cost-meter"><div class="{bar_class}" style="width:{pct}%"></div></div>'
+        )
+    else:
+        input_row = f'<div class="cost-row"><span>Input</span><span>{in_tok:,} tok</span></div>'
     return (
         '<div class="cost-card">'
         '<div class="cost-title">🪙 API Usage</div>'
         f'<div class="cost-row"><span>Model</span><span>{html.escape(model or "—")}</span></div>'
-        f'<div class="cost-row"><span>Input</span><span>{in_tok:,} tok</span></div>'
+        f'{input_row}'
         f'<div class="cost-row"><span>Output</span><span>{out_tok:,} tok</span></div>'
         f'<div class="cost-row cost-total"><span>Cost</span><span>${cost:.4f}</span></div>'
         '</div>'
@@ -427,6 +626,19 @@ def render_error_html(header_html: str, message: str, raw: str = "") -> str:
     return header_html + block
 
 
+def render_recent_push(aid: str, title: str) -> str:
+    """Hidden <img> whose onerror fires once the DOM mounts the cards. Pushes
+    (arxiv_id, title) into the browser's localStorage via window.LITREAD_RECENT
+    so the recent-papers chips update without a server round-trip."""
+    safe_t = (title or "").replace("\\", "\\\\").replace("'", "\\'")
+    safe_a = (aid or "").replace("\\", "\\\\").replace("'", "\\'")
+    return (
+        f'<img src="data:," class="recent-push" alt="" '
+        f'onerror="if(window.LITREAD_RECENT) window.LITREAD_RECENT.push(\''
+        f'{safe_a}\',\'{safe_t}\')">'
+    )
+
+
 # -----------------------------------------------------------------------------
 # Main callback — yields (status_md, output_html, cost_html).
 # -----------------------------------------------------------------------------
@@ -440,6 +652,35 @@ def generate_carousel(url: str, provider: str):
             "❌ **Invalid URL.** Could not find an ArXiv ID.",
             render_placeholder_html("Paste a valid ArXiv URL or ID."),
             initial_cost,
+        )
+        return
+
+    # ---- Cache hit short-circuits both arxiv fetch AND the LLM call. -------
+    ckey = cache_key(aid, provider, model_name)
+    cached = cache_get(ckey)
+    if cached:
+        meta_c = cached.get("meta", {})
+        title_c = meta_c.get("title", "Unknown")
+        bibtex_c = make_bibtex(
+            aid, title_c, meta_c.get("authors_all") or [],
+            int(meta_c.get("year", 0) or 0), meta_c.get("abs_url", ""),
+        )
+        header_c = render_paper_header_html(
+            title_c, meta_c.get("authors", "Unknown"),
+            meta_c.get("published", ""), int(meta_c.get("pages", 0) or 0),
+            bool(meta_c.get("truncated", False)),
+        )
+        actions_c = render_actions_html(
+            meta_c.get("pdf_url", ""), meta_c.get("abs_url", ""), bibtex_c, aid,
+        )
+        cards_c = render_cards_html(
+            header_c, cached.get("hook", ""), cached.get("slides", []),
+            actions_html=actions_c, snippets=cached.get("snippets") or {},
+        ) + render_recent_push(aid, title_c)
+        yield (
+            f"⚡ Cached — `{aid}` served instantly, 0 tokens used.",
+            cards_c,
+            render_cost_html(model_name, 0, 0),
         )
         return
 
@@ -585,15 +826,42 @@ def generate_carousel(url: str, provider: str):
     in_tok = 0
     out_tok = 0
     gen_error: Optional[Exception] = None
+    last_partial_render = 0.0  # seconds since last successful partial parse
+    last_partial_len = 0
+
+    def _partial_html() -> Optional[str]:
+        """Try to parse the buffer as (possibly truncated) JSON and render any
+        complete-enough slides. Returns full output HTML, or None if nothing
+        renderable yet."""
+        partial = try_partial_parse(buffer)
+        if not partial:
+            return None
+        slides_p = partial.get("slides") or []
+        if not isinstance(slides_p, list) or not slides_p:
+            return None
+        hook_p = str(partial.get("hook", "")).strip()
+        # Snippet extraction is cheap (substring search); skip during streaming
+        # to save CPU — final render does the proper pass.
+        cards = render_cards_html(header_html, hook_p, slides_p, actions_html=actions_html)
+        return cards
 
     while True:
         try:
             kind, val = chunk_q.get(timeout=0.3)
         except queue.Empty:
             elapsed = time.monotonic() - t_gen
+            html_out = header_html + render_placeholder_html(
+                f"Generating slides… ({elapsed:.1f}s)"
+            )
+            # Try a partial render at most every 0.6s while waiting.
+            if elapsed - last_partial_render > 0.6:
+                p = _partial_html()
+                if p:
+                    html_out = p
+                    last_partial_render = elapsed
             yield (
                 f"✍️ Generating… {elapsed:.1f}s ({len(buffer):,} chars)",
-                header_html + render_placeholder_html(f"Generating slides… ({elapsed:.1f}s)"),
+                html_out,
                 render_cost_html(model_name, in_tok, out_tok),
             )
             continue
@@ -605,9 +873,20 @@ def generate_carousel(url: str, provider: str):
                 in_tok = usage.get("input_tokens", in_tok) or in_tok
                 out_tok = usage.get("output_tokens", out_tok) or out_tok
             elapsed = time.monotonic() - t_gen
+            html_out = header_html + render_placeholder_html(
+                f"Generating slides… ({elapsed:.1f}s)"
+            )
+            # Throttle partial parse attempts: only retry once the buffer has
+            # grown by 400 chars since the last attempt.
+            if len(buffer) - last_partial_len > 400:
+                p = _partial_html()
+                last_partial_len = len(buffer)
+                if p:
+                    html_out = p
+                    last_partial_render = elapsed
             yield (
                 f"✍️ Generating… {elapsed:.1f}s ({len(buffer):,} chars)",
-                header_html + render_placeholder_html(f"Generating slides… ({elapsed:.1f}s)"),
+                html_out,
                 render_cost_html(model_name, in_tok, out_tok),
             )
         elif kind == "error":
@@ -647,9 +926,28 @@ def generate_carousel(url: str, provider: str):
     if not isinstance(slides, list):
         slides = []
 
-    cards_html = render_cards_html(header_html, hook, slides, actions_html=actions_html)
+    snippets = extract_snippets(slides, paper_text, hook=hook)
+    cards_html = (
+        render_cards_html(
+            header_html, hook, slides,
+            actions_html=actions_html, snippets=snippets,
+        )
+        + render_recent_push(aid, title)
+    )
     total = time.monotonic() - t_start
     gen_dt = time.monotonic() - t_gen
+
+    # Persist to cache so subsequent runs on this paper cost 0 tokens.
+    cache_put(ckey, {
+        "hook": hook,
+        "slides": slides,
+        "snippets": snippets,
+        "meta": {
+            "title": title, "authors": authors, "authors_all": authors_all,
+            "published": published, "year": year, "pages": pages,
+            "pdf_url": pdf_url, "abs_url": abs_url, "truncated": truncated,
+        },
+    })
 
     yield (
         f"✅ Done — `{aid}` in {total:.1f}s "
@@ -772,6 +1070,74 @@ CSS = """
 .paper-title { margin: 0 0 0.4em 0; font-size: 1.4em; line-height: 1.25; }
 .paper-meta p { margin: 0.15em 0; color: #4b5563; }
 .warn { color: #b45309 !important; font-style: italic; }
+
+/* ---- Truncation banner ---- */
+.trunc-banner {
+    display: flex; align-items: flex-start; gap: 0.6em;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    color: #92400e;
+    padding: 0.7em 0.95em;
+    border-radius: 10px;
+    margin: 0.6em 0 1em 0;
+    font-size: 0.95em;
+    line-height: 1.4;
+}
+.trunc-icon { font-size: 1.15em; line-height: 1; }
+
+/* ---- Cited-term hover (bolded terms with paper-text tooltip) ---- */
+strong.cite {
+    cursor: help;
+    border-bottom: 1px dotted #a5b4fc;
+}
+
+/* ---- Cost panel meter ---- */
+.cost-meter {
+    height: 4px;
+    background: #eef2ff;
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0.1em 0 0.4em 0;
+}
+.cost-bar {
+    height: 100%;
+    background: #6366f1;
+    transition: width 0.3s ease;
+}
+.cost-bar-amber { background: #f59e0b; }
+.cost-bar-red   { background: #ef4444; }
+
+/* ---- Recent papers chip row (sits above URL bar) ---- */
+.recent-row {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 0.5em;
+    margin: 0 0 1em 0;
+    min-height: 0;
+}
+.recent-label {
+    color: #6b7280;
+    font-size: 0.9em;
+    font-weight: 500;
+    margin-right: 0.2em;
+}
+.recent-chip {
+    display: inline-flex; align-items: center;
+    padding: 0.35em 0.75em;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 999px;
+    font-size: 0.85em;
+    color: #4b5563;
+    cursor: pointer;
+    font-family: inherit;
+    max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.recent-chip:hover {
+    background: #eef2ff; border-color: #6366f1; color: #4338ca;
+}
+img.recent-push { width: 0; height: 0; }
 
 /* ---- Action buttons (Export / PDF / Zotero) ---- */
 .action-row {
@@ -957,6 +1323,67 @@ window.MathJax = {
   }
 })();
 
+// ---- Recent papers: localStorage-backed chip row above URL input -------
+// Pure client-side: the server-rendered <img class="recent-push"> fires
+// onerror on mount and calls window.LITREAD_RECENT.push(aid, title).
+window.LITREAD_RECENT = {
+  KEY: 'litread.recent',
+  MAX: 8,
+  read: function() {
+    try { return JSON.parse(localStorage.getItem(this.KEY) || '[]') || []; }
+    catch (e) { return []; }
+  },
+  write: function(arr) {
+    try { localStorage.setItem(this.KEY, JSON.stringify(arr.slice(0, this.MAX))); }
+    catch (e) { /* quota or private-mode — silently ignore */ }
+  },
+  push: function(aid, title) {
+    if (!aid) return;
+    var arr = this.read().filter(function(e) { return e.aid !== aid; });
+    arr.unshift({ aid: aid, title: title || aid, t: Date.now() });
+    this.write(arr);
+    this.render();
+  },
+  render: function() {
+    var box = document.getElementById('recent-papers');
+    if (!box) return;
+    var arr = this.read();
+    if (!arr.length) { box.innerHTML = ''; return; }
+    var html = '<div class="recent-row"><span class="recent-label">Recent:</span>';
+    arr.forEach(function(e) {
+      var t = (e.title || e.aid).replace(/[<>&"']/g, function(c) {
+        return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c];
+      });
+      var aSafe = e.aid.replace(/'/g, "\\'");
+      html += '<button type="button" class="recent-chip" title="' + t +
+        '" onclick="window.LITREAD_RECENT.load(\'' + aSafe + '\')">' +
+        e.aid + '</button>';
+    });
+    html += '</div>';
+    box.innerHTML = html;
+  },
+  load: function(aid) {
+    var ta = document.querySelector('#url-box textarea');
+    if (ta) {
+      ta.value = 'https://arxiv.org/abs/' + aid;
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    var btn = document.querySelector('#generate-row button');
+    if (btn) btn.click();
+  }
+};
+function __mountRecent() {
+  if (!document.getElementById('recent-papers')) {
+    setTimeout(__mountRecent, 300); return;
+  }
+  window.LITREAD_RECENT.render();
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', __mountRecent);
+} else {
+  __mountRecent();
+}
+
 // ---- Export rendered cards to PNG via html2canvas -----------------------
 window.exportCardsToPng = async function() {
   var target = document.getElementById('output');
@@ -1027,6 +1454,9 @@ def build_ui() -> gr.Blocks:
             )
             with gr.Row(elem_id="generate-row"):
                 generate_btn = gr.Button("✨ Generate Carousel", variant="primary")
+            # Container populated by JS reading localStorage on page load and
+            # after each <img class="recent-push"> mount.
+            gr.HTML(value="", elem_id="recent-papers")
 
         status = gr.Markdown("_Ready._", elem_id="status")
         output = gr.HTML(value="", elem_id="output")
