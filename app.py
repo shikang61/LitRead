@@ -674,15 +674,17 @@ def generate_carousel(url: str, provider: str):
 
         last_err = err
         # arxiv lib raises its own HTTPError class, urllib raises another — duck-type the
-        # status so both metadata-API and PDF-fetch 429s hit the same retry path.
+        # status so both metadata-API and PDF-fetch transient failures hit the retry path.
         status = getattr(err, "code", None) or getattr(err, "status", None)
-        if status == 429 and attempt < MAX_FETCH_RETRIES - 1:
+        retryable = status == 429 or (isinstance(status, int) and 500 <= status < 600)
+        if retryable and attempt < MAX_FETCH_RETRIES - 1:
             wait = (attempt + 1) * 5
+            label = "Rate-limited" if status == 429 else f"ArXiv {status}"
             for s in range(wait, 0, -1):
                 yield (
-                    f"⏳ Rate-limited by arxiv (HTTP 429). "
+                    f"⏳ {label} (HTTP {status}). "
                     f"Retrying in **{s}s** (attempt {attempt + 2}/{MAX_FETCH_RETRIES})…",
-                    render_placeholder_html("Waiting on arxiv rate limit…"),
+                    render_placeholder_html(f"Waiting on arxiv (HTTP {status})…"),
                     initial_cost,
                 )
                 time.sleep(1)
