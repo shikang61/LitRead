@@ -74,7 +74,12 @@ PROVIDERS = {
 # -----------------------------------------------------------------------------
 # System prompt — strict JSON output.
 # -----------------------------------------------------------------------------
-CAROUSEL_PROMPT = """You are a captivating science communicator.
+CAROUSEL_PROMPT = """You are a clear, plain-spoken explainer of research papers for a curious non-expert.
+
+GOAL: After reading all cards, the reader should understand the paper's key learnings — the
+problem, the core idea, how it works, the main result, and what's new about it — well enough
+that opening the actual paper feels like a deep-dive, not a cold start. A reader who only sees
+the cards should still walk away knowing what the paper did and why it matters.
 
 You will receive the full text of a research paper. Produce a JSON object describing a
 "bite-sized carousel" summary — a series of compact cards.
@@ -93,20 +98,60 @@ OUTPUT FORMAT (strict JSON, no markdown fences, no commentary):
   ]
 }
 
-ASPECTS to cover (skip any absent from the paper):
-  🎯 Motivation, 🌍 Context, 💡 Proposed Solution,
-  ⚙️ How It Works, 🏆 Key Results, 📊 Comparison to Existing Methods, 🔮 Future Work
+ASPECTS to cover, in this order (skip any absent from the paper):
+  🎯 Motivation, 🌍 Context, 🌟 Why It Matters,
+  💡 Proposed Solution, 🏆 Key Results,
+  📊 Comparison to Existing Methods, 🔮 Future Work
 
-RULES:
-- Use ONLY information from the paper text. Never invent facts.
+"💡 Proposed Solution" should cover both the high-level idea AND a short sketch of how it
+works mechanically — the reader does not need a separate "How It Works" card.
+
+"🌟 Why It Matters" should explain the paper's contribution and impact on the field —
+what the community gains (new capability, new benchmark, new tool, settled question, opened
+direction). Stay grounded in the paper's own framing of its contribution; do not project
+future impact the authors did not claim.
+
+ACCURACY (highest priority — overrides every other rule):
+- Use ONLY information stated or directly supported by the paper text. Do NOT invent results,
+  manufacture motivation, or fill gaps from prior knowledge. If the paper does not support it,
+  do not write it.
+- LIBERAL paraphrasing is encouraged — rewrite freely into plain, conversational English to
+  maximise readability. You may restructure sentences, swap analogies for jargon, change voice,
+  and reorder clauses. The goal is digestibility, not transcription.
+- HARD CONSTRAINTS that paraphrasing must NOT cross:
+  - Numbers, model names, dataset names, metric names, and named methods stay VERBATIM.
+    Never round percentages, never swap units, never rename a model or dataset.
+  - Hedges and scope qualifiers must survive in some form ("on small models", "for English
+    only", "preliminary", "in our setting"). You may rephrase them, but never delete them.
+  - Don't upgrade tentative findings into definitive ones. "Suggests" ≠ "proves".
+  - Don't invent contributions, baselines, or impact the authors didn't claim.
+- Useful analogies are allowed when they illuminate a concept — but flag them clearly as
+  analogies (e.g. "think of it like…") so the reader doesn't mistake them for paper content.
+- If an aspect (e.g. "Future Work") is not discussed in the paper, OMIT that slide entirely.
+  Do not fabricate plausible-sounding content to fill a slot.
+
+LANGUAGE (layman-first, jargon only when load-bearing):
+- Write as if explaining to a curious friend over coffee, not in an academic abstract.
+- Default to plain English. Replace jargon with everyday words whenever the meaning survives
+  (e.g. "the model learns from its own mistakes" beats "self-supervised reward refinement").
+- Keep technical terms ONLY when (a) they are the paper's central named contribution
+  (method/model/dataset names), (b) removing them would distort the meaning, or
+  (c) a reader looking the paper up needs them to find related work.
+- When a technical term is unavoidable, define it inline in <=6 words on first use, e.g.
+  "**RLHF** (training from human ratings)".
+- Avoid: "novel", "leverage", "robust", "state-of-the-art", "paradigm", "framework" as filler.
+  Use only when the paper itself emphasises them.
+
+CARD STRUCTURE:
 - Each `body`: ONE short sentence (max ~20 words) — a framing line, not a full explanation.
 - Each `bullets`: 2–4 punchy bullets (max ~12 words each). Use bullets to carry the substance.
-- **MANDATORY bold formatting** — every `body` and every bullet MUST wrap 1–2 key technical
-  terms in markdown bold using DOUBLE asterisks: `**term**`. Pick the most important concept,
-  method name, dataset, model, or metric in each line. Do NOT bold whole phrases — single
-  terms only. Example bullet: `"Beats **GPT-4** by **+15.2 pp** on **MMLU**"`.
-- Layman language. Define jargon briefly when unavoidable. Captivating tone.
 - `bullets` is optional — omit if a single short sentence in `body` covers the slide cleanly.
+
+FORMATTING:
+- **MANDATORY bold** — every `body` and every bullet MUST wrap at least 3 key terms in markdown bold
+  using DOUBLE asterisks: `**term**`. Pick the most important concept, method name, dataset,
+  model, or metric in each line. Do NOT bold whole phrases — single terms only.
+  Example bullet: `"Beats **GPT-4** by **+15.2 pp** on **MMLU**"`.
 - Output ONLY the JSON object — no prose before/after, no markdown fences.
 - You MAY use LaTeX for math: `$x = y^2$` for inline, `$$E = mc^2$$` for display. Keep equations short.
   When emitting LaTeX in JSON strings, escape backslashes as `\\\\` (e.g. `\\\\frac{a}{b}`).
@@ -134,17 +179,21 @@ def extract_arxiv_id(text: str) -> Optional[str]:
 
 
 def load_arxiv_paper(arxiv_id: str) -> List[Document]:
-    client = arxiv.Client(page_size=1, delay_seconds=3.0, num_retries=3)
+    # delay_seconds=0.5 (down from arxiv default 3.0) + num_retries=2 keeps the metadata
+    # round-trip under ~2s when arxiv is healthy; backoff still handled by generate_carousel.
+    client = arxiv.Client(page_size=1, delay_seconds=0.5, num_retries=2)
     results = list(client.results(arxiv.Search(id_list=[arxiv_id])))
     if not results:
         return []
     result = results[0]
 
-    with urllib.request.urlopen(result.pdf_url) as resp:
+    # Hard 30s ceiling — without timeout, urlopen hangs forever when arxiv's CDN stalls.
+    with urllib.request.urlopen(result.pdf_url, timeout=30) as resp:
         pdf_bytes = resp.read()
     with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
         page_count = pdf.page_count
-        text = "\n\n".join(page.get_text() for page in pdf)
+        # "text" extraction mode is fastest; skips layout/HTML reconstruction.
+        text = "\n\n".join(page.get_text("text") for page in pdf)
 
     names = [a.name for a in result.authors]
     if not names:
@@ -322,7 +371,7 @@ def render_cards_html(
     if actions_html:
         parts.append(actions_html)
     if hook:
-        parts.append(f'<div class="hook">{html.escape(hook)}</div>')
+        parts.append(f'<div class="hook">{escape_with_bold(hook)}</div>')
     parts.append('<div class="card-grid">')
     for slide in slides:
         emoji = html.escape(str(slide.get("emoji", "🎠")))
@@ -437,7 +486,10 @@ def generate_carousel(url: str, provider: str):
             break
 
         last_err = err
-        if isinstance(err, urllib.error.HTTPError) and err.code == 429 and attempt < MAX_FETCH_RETRIES - 1:
+        # arxiv lib raises its own HTTPError class, urllib raises another — duck-type the
+        # status so both metadata-API and PDF-fetch 429s hit the same retry path.
+        status = getattr(err, "code", None) or getattr(err, "status", None)
+        if status == 429 and attempt < MAX_FETCH_RETRIES - 1:
             wait = (attempt + 1) * 5
             for s in range(wait, 0, -1):
                 yield (
@@ -450,8 +502,8 @@ def generate_carousel(url: str, provider: str):
             continue
 
         msg = (
-            f"HTTP {err.code}: {err.reason}"
-            if isinstance(err, urllib.error.HTTPError)
+            f"HTTP {status}: {getattr(err, 'reason', '') or err}"
+            if status
             else f"{type(err).__name__}: {err}"
         )
         yield (
@@ -751,6 +803,11 @@ CSS = """
     transform: translateY(-1px);
 }
 .action-btn:active { transform: translateY(0); }
+.action-btn.is-active {
+    background: #eef2ff;
+    border-color: #6366f1;
+    color: #4338ca;
+}
 .action-icon { font-size: 1.1em; line-height: 1; }
 
 /* ---- Hook ---- */
@@ -770,10 +827,12 @@ CSS = """
 /* ---- Card grid ---- */
 .card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
     margin-top: 0.5em;
 }
+@media (max-width: 820px) { .card-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px) { .card-grid { grid-template-columns: 1fr; } }
 .card {
     background: #fff;
     border: 1px solid #e5e7eb;
