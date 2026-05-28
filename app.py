@@ -53,7 +53,7 @@ MAX_PAPER_CHARS = 200_000
 MAX_FETCH_RETRIES = 4
 
 # Bump this whenever CAROUSEL_PROMPT changes — invalidates cached carousels.
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 # Cache dir for arxiv_id+prompt_version → carousel JSON. Use /data on HF Spaces
 # with persistent storage; falls back to local ./cache otherwise.
@@ -146,6 +146,11 @@ ACCURACY (highest priority — overrides every other rule):
 
 LANGUAGE (layman-first, jargon only when load-bearing):
 - Write as if explaining to a curious friend over coffee, not in an academic abstract.
+- **Active voice, always.** Subject does the verb. Rewrite passive constructions:
+  ✅ "The model learns from its own mistakes"
+  ❌ "Mistakes are learned from by the model"
+  ✅ "**LoRA** cuts training cost by **3x**"
+  ❌ "Training cost is cut by **3x** through the use of **LoRA**"
 - Default to plain English. Replace jargon with everyday words whenever the meaning survives
   (e.g. "the model learns from its own mistakes" beats "self-supervised reward refinement").
 - Keep technical terms ONLY when (a) they are the paper's central named contribution
@@ -400,80 +405,22 @@ def parse_carousel_json(text: str) -> Dict[str, Any]:
     raise last_err if last_err else json.JSONDecodeError("no candidate", s, 0)
 
 
-def try_partial_parse(text: str) -> Optional[Dict[str, Any]]:
-    """Same as parse_carousel_json but returns None on failure (for streaming)."""
-    try:
-        return parse_carousel_json(text)
-    except Exception:
-        return None
 
 
 # ---- HTML renderers --------------------------------------------------------
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 
 
-def escape_with_bold(text: str, snippets: Optional[Dict[str, str]] = None) -> str:
-    """HTML-escape, then convert `**term**` → `<strong>term</strong>`.
-
-    If `snippets[term]` exists, attach it as a `title=` attribute so hovering
-    the bolded term in the browser pops a tooltip with the paper-text snippet.
-    """
+def escape_with_bold(text: str) -> str:
+    """HTML-escape, then convert `**term**` → `<strong>term</strong>`."""
     parts: List[str] = []
     last = 0
     for m in _BOLD_RE.finditer(text):
         parts.append(html.escape(text[last:m.start()]))
-        term = m.group(1)
-        snip = (snippets or {}).get(term.strip())
-        if snip:
-            parts.append(
-                f'<strong class="cite" title="{html.escape(snip[:320])}">'
-                f'{html.escape(term)}</strong>'
-            )
-        else:
-            parts.append(f'<strong>{html.escape(term)}</strong>')
+        parts.append(f'<strong>{html.escape(m.group(1))}</strong>')
         last = m.end()
     parts.append(html.escape(text[last:]))
     return "".join(parts)
-
-
-def extract_snippets(
-    slides: List[Dict[str, Any]],
-    paper_text: str,
-    hook: str = "",
-) -> Dict[str, str]:
-    """For every bolded term in hook/body/bullets, find its first occurrence in
-    the paper text and return ±100 chars of surrounding context."""
-    terms = set()
-
-    def collect(s: str) -> None:
-        for m in _BOLD_RE.finditer(s or ""):
-            term = m.group(1).strip()
-            if 2 <= len(term) <= 60:
-                terms.add(term)
-
-    collect(hook)
-    for slide in slides:
-        collect(str(slide.get("body", "")))
-        for b in slide.get("bullets") or []:
-            collect(str(b))
-
-    snippets: Dict[str, str] = {}
-    text_lower = paper_text.lower()
-    for term in terms:
-        idx = text_lower.find(term.lower())
-        if idx < 0:
-            continue
-        start = max(0, idx - 100)
-        end = min(len(paper_text), idx + len(term) + 100)
-        # Single-line, collapse internal whitespace; PDF text is full of \n.
-        snippet = re.sub(r"\s+", " ", paper_text[start:end]).strip()
-        # Bracket prefix/suffix when we've trimmed.
-        if start > 0:
-            snippet = "…" + snippet
-        if end < len(paper_text):
-            snippet = snippet + "…"
-        snippets[term] = snippet
-    return snippets
 
 
 def make_bibtex(arxiv_id: str, title: str, authors_all: List[str], year: int, abs_url: str) -> str:
@@ -548,13 +495,12 @@ def render_cards_html(
     hook: str,
     slides: List[Dict[str, Any]],
     actions_html: str = "",
-    snippets: Optional[Dict[str, str]] = None,
 ) -> str:
     parts = [header_html]
     if actions_html:
         parts.append(actions_html)
     if hook:
-        parts.append(f'<div class="hook">{escape_with_bold(hook, snippets)}</div>')
+        parts.append(f'<div class="hook">{escape_with_bold(hook)}</div>')
     parts.append('<div class="card-grid">')
     for slide in slides:
         emoji = html.escape(str(slide.get("emoji", "🎠")))
@@ -569,10 +515,10 @@ def render_cards_html(
             f'<h3>{title}</h3>',
         ]
         if body:
-            card_inner.append(f'<p>{escape_with_bold(body, snippets)}</p>')
+            card_inner.append(f'<p>{escape_with_bold(body)}</p>')
         if bullets:
             items = "".join(
-                f'<li>{escape_with_bold(str(b).strip(), snippets)}</li>'
+                f'<li>{escape_with_bold(str(b).strip())}</li>'
                 for b in bullets
                 if str(b).strip()
             )
@@ -675,7 +621,7 @@ def generate_carousel(url: str, provider: str):
         )
         cards_c = render_cards_html(
             header_c, cached.get("hook", ""), cached.get("slides", []),
-            actions_html=actions_c, snippets=cached.get("snippets") or {},
+            actions_html=actions_c,
         ) + render_recent_push(aid, title_c)
         yield (
             f"⚡ Cached — `{aid}` served instantly, 0 tokens used.",
@@ -826,42 +772,15 @@ def generate_carousel(url: str, provider: str):
     in_tok = 0
     out_tok = 0
     gen_error: Optional[Exception] = None
-    last_partial_render = 0.0  # seconds since last successful partial parse
-    last_partial_len = 0
-
-    def _partial_html() -> Optional[str]:
-        """Try to parse the buffer as (possibly truncated) JSON and render any
-        complete-enough slides. Returns full output HTML, or None if nothing
-        renderable yet."""
-        partial = try_partial_parse(buffer)
-        if not partial:
-            return None
-        slides_p = partial.get("slides") or []
-        if not isinstance(slides_p, list) or not slides_p:
-            return None
-        hook_p = str(partial.get("hook", "")).strip()
-        # Snippet extraction is cheap (substring search); skip during streaming
-        # to save CPU — final render does the proper pass.
-        cards = render_cards_html(header_html, hook_p, slides_p, actions_html=actions_html)
-        return cards
 
     while True:
         try:
             kind, val = chunk_q.get(timeout=0.3)
         except queue.Empty:
             elapsed = time.monotonic() - t_gen
-            html_out = header_html + render_placeholder_html(
-                f"Generating slides… ({elapsed:.1f}s)"
-            )
-            # Try a partial render at most every 0.6s while waiting.
-            if elapsed - last_partial_render > 0.6:
-                p = _partial_html()
-                if p:
-                    html_out = p
-                    last_partial_render = elapsed
             yield (
                 f"✍️ Generating… {elapsed:.1f}s ({len(buffer):,} chars)",
-                html_out,
+                header_html + render_placeholder_html(f"Generating slides… ({elapsed:.1f}s)"),
                 render_cost_html(model_name, in_tok, out_tok),
             )
             continue
@@ -873,20 +792,9 @@ def generate_carousel(url: str, provider: str):
                 in_tok = usage.get("input_tokens", in_tok) or in_tok
                 out_tok = usage.get("output_tokens", out_tok) or out_tok
             elapsed = time.monotonic() - t_gen
-            html_out = header_html + render_placeholder_html(
-                f"Generating slides… ({elapsed:.1f}s)"
-            )
-            # Throttle partial parse attempts: only retry once the buffer has
-            # grown by 400 chars since the last attempt.
-            if len(buffer) - last_partial_len > 400:
-                p = _partial_html()
-                last_partial_len = len(buffer)
-                if p:
-                    html_out = p
-                    last_partial_render = elapsed
             yield (
                 f"✍️ Generating… {elapsed:.1f}s ({len(buffer):,} chars)",
-                html_out,
+                header_html + render_placeholder_html(f"Generating slides… ({elapsed:.1f}s)"),
                 render_cost_html(model_name, in_tok, out_tok),
             )
         elif kind == "error":
@@ -926,12 +834,8 @@ def generate_carousel(url: str, provider: str):
     if not isinstance(slides, list):
         slides = []
 
-    snippets = extract_snippets(slides, paper_text, hook=hook)
     cards_html = (
-        render_cards_html(
-            header_html, hook, slides,
-            actions_html=actions_html, snippets=snippets,
-        )
+        render_cards_html(header_html, hook, slides, actions_html=actions_html)
         + render_recent_push(aid, title)
     )
     total = time.monotonic() - t_start
@@ -941,7 +845,6 @@ def generate_carousel(url: str, provider: str):
     cache_put(ckey, {
         "hook": hook,
         "slides": slides,
-        "snippets": snippets,
         "meta": {
             "title": title, "authors": authors, "authors_all": authors_all,
             "published": published, "year": year, "pages": pages,
@@ -1084,12 +987,6 @@ CSS = """
     line-height: 1.4;
 }
 .trunc-icon { font-size: 1.15em; line-height: 1; }
-
-/* ---- Cited-term hover (bolded terms with paper-text tooltip) ---- */
-strong.cite {
-    cursor: help;
-    border-bottom: 1px dotted #a5b4fc;
-}
 
 /* ---- Cost panel meter ---- */
 .cost-meter {
