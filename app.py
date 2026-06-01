@@ -1302,6 +1302,18 @@ window.lrFlash = function(id) {
       rubber.style.width = Math.abs(x - start.x) + 'px';
       rubber.style.height = Math.abs(y - start.y) + 'px';
     });
+    function overlapsExisting(x0, y0, x1, y1) {
+      var page = layer.parentElement;
+      if (!page) return null;
+      var sels = page.querySelectorAll('.lr-sel');
+      for (var i = 0; i < sels.length; i++) {
+        var s = sels[i];
+        var sx0 = parseFloat(s.style.left) / 100, sy0 = parseFloat(s.style.top) / 100;
+        var sx1 = sx0 + parseFloat(s.style.width) / 100, sy1 = sy0 + parseFloat(s.style.height) / 100;
+        if (!(x1 <= sx0 || x0 >= sx1 || y1 <= sy0 || y0 >= sy1)) return s;  // intersects
+      }
+      return null;
+    }
     function finish(e) {
       if (!start) return;
       var r = layer.getBoundingClientRect();
@@ -1310,9 +1322,10 @@ window.lrFlash = function(id) {
       var y0 = Math.min(start.y, y) / r.height, y1 = Math.max(start.y, y) / r.height;
       if (rubber) { rubber.remove(); rubber = null; }
       start = null;
-      if ((x1 - x0) > 0.01 && (y1 - y0) > 0.01) {
-        setSelectionAndSubmit(parseInt(layer.dataset.page, 10), [x0, y0, x1, y1]);
-      }
+      if ((x1 - x0) <= 0.01 || (y1 - y0) <= 0.01) return;   // too small — ignore
+      var hit = overlapsExisting(x0, y0, x1, y1);
+      if (hit) { if (hit.id) window.lrFlash(hit.id); return; }  // already summarised — reject
+      setSelectionAndSubmit(parseInt(layer.dataset.page, 10), [x0, y0, x1, y1]);
     }
     layer.addEventListener('mouseup', finish);
     layer.addEventListener('mouseleave', function(e) { if (start) finish(e); });
