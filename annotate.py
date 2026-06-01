@@ -36,8 +36,10 @@ REGION_PROMPT = """You are a clear, plain-spoken science communicator.
 The user selected a region of a research paper; you are given the text from that region.
 Explain what it says in plain, layman's terms as 2 to 4 short bullet points. Put each
 bullet on its own line starting with "- ", one idea per bullet, no jargon (define any
-unavoidable term in a few words). If it is an equation, say in words what it computes or
-represents. Stay grounded in the given text; do not invent results.
+unavoidable term in a few words). **Bold the most important term(s)** in each bullet using
+double asterisks, e.g. "- The model uses **contrastive learning** to ...". If it is an
+equation, say in words what it computes or represents. Stay grounded in the given text;
+do not invent results.
 
 Output ONLY the bullet lines (each starting with "- "), nothing else."""
 
@@ -149,7 +151,7 @@ def _bullets_html(summary: str) -> str:
     if not items:
         t = (summary or "").strip()
         items = [t] if t else []
-    lis = "".join(f"<li>{html.escape(it)}</li>" for it in items)
+    lis = "".join(f"<li>{core.escape_with_bold(it)}</li>" for it in items)
     return f'<ul class="lr-bullets">{lis}</ul>'
 
 

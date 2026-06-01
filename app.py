@@ -37,6 +37,7 @@ from core import (
     cache_get,
     cache_key,
     cache_put,
+    escape_with_bold,
     estimate_cost,
     extract_arxiv_id,
     make_llm,
@@ -166,19 +167,6 @@ def load_arxiv_paper(arxiv_id: str) -> List[Document]:
 
 
 # ---- HTML renderers --------------------------------------------------------
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
-
-
-def escape_with_bold(text: str) -> str:
-    """HTML-escape, then convert `**term**` → `<strong>term</strong>`."""
-    parts: List[str] = []
-    last = 0
-    for m in _BOLD_RE.finditer(text):
-        parts.append(html.escape(text[last:m.start()]))
-        parts.append(f'<strong>{html.escape(m.group(1))}</strong>')
-        last = m.end()
-    parts.append(html.escape(text[last:]))
-    return "".join(parts)
 
 
 def make_bibtex(arxiv_id: str, title: str, authors_all: List[str], year: int, abs_url: str) -> str:
@@ -1078,8 +1066,10 @@ img.recent-push { width: 0; height: 0; }
     margin-top: 0.1em;
 }
 .lr-note-body { display: flex; flex-direction: column; gap: 0.25em; }
-.lr-bullets { margin: 0; padding-left: 1.1em; color: #374151; }
-.lr-bullets li { margin: 0.18em 0; line-height: 1.4; font-size: 0.95em; }
+.lr-bullets { margin: 0; padding-left: 0; list-style: none; color: #374151; }
+.lr-bullets li { position: relative; padding-left: 0.85em; margin: 0.18em 0; line-height: 1.4; font-size: 0.95em; }
+.lr-bullets li::before { content: "•"; color: #6366f1; position: absolute; left: 0; top: 0; }
+.lr-bullets strong { color: #4f46e5; font-weight: 600; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
