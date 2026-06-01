@@ -1057,11 +1057,12 @@ img.recent-push { width: 0; height: 0; }
 .lr-box-figure   { outline-color: #10b981; background: rgba(16,185,129,0.07); }
 .lr-box-num {
     position: absolute;
-    top: -11px; left: -11px;
-    width: 22px; height: 22px;
+    bottom: 100%; left: -4px;     /* sit above the box, not over the boxed content */
+    margin-bottom: 4px;
+    width: 20px; height: 20px;
     background: #6366f1; color: #fff;
     border-radius: 50%;
-    font-size: 0.72em; font-weight: 700;
+    font-size: 0.7em; font-weight: 700;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
