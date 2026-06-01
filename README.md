@@ -23,10 +23,10 @@ OpenAI or Grok via LangChain, served through a minimalist Gradio web UI.
 - 🔗 **Paste any ArXiv URL or ID** — `https://arxiv.org/abs/2305.10601`, `2305.10601v3`, or `cs.LG/0701001`.
 - 🃏 **Carousel cards** — one card per aspect (Motivation, Context, Proposed Solution, How It Works,
   Key Results, Comparison, Future Work) with a 1-line framing sentence + 2–4 punchy bullets.
-- 🔎 **Annotated reader** — `Annotate Paper` renders each PDF page beside a notes column: the LLM
-  boxes the high-signal paragraphs/equations/figures, highlights key phrases, and writes a one-line
-  takeaway per box. Click a note to scroll to + flash its box. Skim the notes for the gist, then
-  dive into the boxes you care about.
+- 🔎 **Interactive reader** — `Annotate Paper` opens the PDF as page images; **drag a box** over any
+  region and get an on-demand plain-English summary in a side panel. Selections accumulate as a
+  numbered running list with matching markers on the page; click a card to flash its marker. API
+  usage/cost is tracked per session.
 - ✍️ **Layman language** — captivating, jargon-light tone with key technical terms bolded.
 - ➗ **Math rendering** — LaTeX via MathJax (`$inline$`, `$$display$$`).
 - 🔄 **Live timers** — fetch + generation elapsed time tick every 0.3s.
@@ -121,7 +121,7 @@ model's context window + your wallet).
 .
 ├── app.py            # Carousel pipeline + Gradio UI, callbacks, CSS, MathJax loader
 ├── core.py           # Shared helpers: providers, ArXiv ID, fetch_pdf, LLM factory, cache, JSON parser
-├── annotate.py       # Annotated reader: block extraction, page render, annotation LLM call, HTML
+├── annotate.py       # Interactive reader: page render, region text extraction, on-demand LLM summary
 ├── tests/            # pytest suite (core + annotate; network smoke gated by RUN_NET_SMOKE)
 ├── requirements.txt  # Pinned minimums for runtime deps
 ├── .env.example      # Template — copy to .env and fill in keys

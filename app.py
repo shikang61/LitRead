@@ -41,6 +41,7 @@ from core import (
     extract_arxiv_id,
     make_llm,
     parse_json,
+    render_cost_html,
     strip_references,
 )
 
@@ -285,35 +286,6 @@ def render_cards_html(
         parts.append(f'<div class="card">{"".join(card_inner)}</div>')
     parts.append("</div>")
     return "".join(parts)
-
-
-def render_cost_html(model: str = "—", in_tok: int = 0, out_tok: int = 0) -> str:
-    cost = estimate_cost(model, in_tok, out_tok)
-    cap = MODEL_CONTEXT.get(model)
-    if cap:
-        pct = max(0, min(100, int(in_tok / cap * 100))) if in_tok else 0
-        # Colour the bar amber >70% / red >90% so over-budget runs are visible.
-        bar_class = "cost-bar"
-        if pct >= 90:
-            bar_class += " cost-bar-red"
-        elif pct >= 70:
-            bar_class += " cost-bar-amber"
-        input_row = (
-            f'<div class="cost-row"><span>Input</span>'
-            f'<span>{in_tok:,} / {cap:,} tok</span></div>'
-            f'<div class="cost-meter"><div class="{bar_class}" style="width:{pct}%"></div></div>'
-        )
-    else:
-        input_row = f'<div class="cost-row"><span>Input</span><span>{in_tok:,} tok</span></div>'
-    return (
-        '<div class="cost-card">'
-        '<div class="cost-title">🪙 API Usage</div>'
-        f'<div class="cost-row"><span>Model</span><span>{html.escape(model or "—")}</span></div>'
-        f'{input_row}'
-        f'<div class="cost-row"><span>Output</span><span>{out_tok:,} tok</span></div>'
-        f'<div class="cost-row cost-total"><span>Cost</span><span>${cost:.4f}</span></div>'
-        '</div>'
-    )
 
 
 def render_placeholder_html(msg: str) -> str:
@@ -1043,21 +1015,31 @@ img.recent-push { width: 0; height: 0; }
     border: 1px solid #e5e7eb; border-radius: 8px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
-.lr-box {
+/* Hidden bridge components the drag JS drives. */
+#lr-selection, #lr-summarize { display: none !important; }
+/* Transparent layer over each page that captures the rubber-band drag. */
+.lr-drawlayer { position: absolute; inset: 0; cursor: crosshair; z-index: 2; }
+.lr-rubber {
+    position: absolute;
+    border: 1.5px dashed #6366f1;
+    background: rgba(99,102,241,0.12);
+    pointer-events: none;
+    z-index: 3;
+}
+/* Marker drawn at a saved selection. */
+.lr-sel {
     position: absolute;
     outline: 2px solid #6366f1;
-    outline-offset: 3px;        /* push the border off the text so highlights aren't blocked */
-    border-radius: 5px;
-    background: rgba(99,102,241,0.06);
+    outline-offset: 2px;
+    border-radius: 4px;
+    background: rgba(99,102,241,0.10);
     pointer-events: none;
     box-sizing: border-box;
     transition: box-shadow 0.2s ease, background 0.2s ease;
 }
-.lr-box-equation { outline-color: #f59e0b; background: rgba(245,158,11,0.07); }
-.lr-box-figure   { outline-color: #10b981; background: rgba(16,185,129,0.07); }
 .lr-box-num {
     position: absolute;
-    bottom: 100%; left: -4px;     /* sit above the box, not over the boxed content */
+    bottom: 100%; left: -4px;     /* sit above the marker, not over the content */
     margin-bottom: 4px;
     width: 20px; height: 20px;
     background: #6366f1; color: #fff;
@@ -1065,34 +1047,28 @@ img.recent-push { width: 0; height: 0; }
     font-size: 0.7em; font-weight: 700;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    z-index: 4;
 }
-.lr-box-equation .lr-box-num { background: #f59e0b; }
-.lr-box-figure   .lr-box-num { background: #10b981; }
-.lr-hl {
-    position: absolute;
-    background: rgba(250,204,21,0.45);
-    mix-blend-mode: multiply;
-    border-radius: 2px;
-    pointer-events: none;
-}
-.lr-box.lr-flash {
+.lr-sel.lr-flash {
     box-shadow: 0 0 0 4px rgba(99,102,241,0.45);
-    background: rgba(99,102,241,0.18);
+    background: rgba(99,102,241,0.22);
 }
-/* Notes are absolutely positioned at their box's vertical level (set inline +
-   refined by lrLayoutNotes to avoid overlaps). */
-.lr-notes { flex: 1 1 42%; min-width: 0; position: relative; }
+.lr-hint {
+    font-size: 0.85em; color: #4338ca;
+    background: #eef2ff; border: 1px solid #c7d2fe;
+    border-radius: 8px; padding: 0.5em 0.8em; margin: 0 0 1.2em 0;
+}
+/* Summary cards stack in order beside the page. */
+.lr-notes { flex: 1 1 42%; min-width: 0; display: flex; flex-direction: column; gap: 0.5em; }
 .lr-note {
-    position: absolute;
-    left: 0; right: 0;
     box-sizing: border-box;
     display: flex; gap: 0.6em; align-items: flex-start;
     padding: 0.6em 0.8em;
     border: 1px solid #e5e7eb; border-radius: 10px;
     background: #fff; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, top 0.15s ease;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
-.lr-note:hover { background: #eef2ff; border-color: #6366f1; }
+.lr-note:hover { background: #eef2ff; border-color: #6366f1; transform: translateX(2px); }
 .lr-note-num {
     flex: 0 0 auto;
     width: 22px; height: 22px;
@@ -1102,14 +1078,6 @@ img.recent-push { width: 0; height: 0; }
     margin-top: 0.1em;
 }
 .lr-note-body { display: flex; flex-direction: column; gap: 0.25em; }
-.lr-kind {
-    align-self: flex-start;
-    font-size: 0.62em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-    color: #4f46e5; background: #eef2ff;
-    padding: 0.12em 0.55em; border-radius: 99px;
-}
-.lr-kind-equation { color: #b45309; background: #fef3c7; }
-.lr-kind-figure   { color: #047857; background: #d1fae5; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
@@ -1228,8 +1196,6 @@ window.LITREAD_RECENT = {
     var next = !this.isCollapsed();
     try { localStorage.setItem(this.CKEY, next ? '1' : '0'); } catch (e) {}
     this.applyCollapsed();
-    // Content width changes with the gutter; re-align notes after the transition.
-    if (window.lrLayoutNotes) setTimeout(window.lrLayoutNotes, 260);
   },
   load: function(aid) {
     var ta = document.querySelector('#url-box textarea');
@@ -1295,50 +1261,70 @@ window.lrFlash = function(id) {
   setTimeout(function() { el.classList.remove('lr-flash'); }, 1500);
 };
 
-// ---- Annotated reader: align each note to its box's vertical position ----
-// Desired top = the box's top % of the page image; a greedy pass then pushes
-// any overlapping notes downward so they stay readable near their anchors.
-window.lrLayoutNotes = function() {
-  document.querySelectorAll('#reader .lr-row').forEach(function(row) {
-    var img = row.querySelector('.lr-page-img');
-    var col = row.querySelector('.lr-notes');
-    if (!img || !col) return;
-    var h = img.clientHeight;
-    if (!h) return;                       // image not laid out yet; retry on load
-    var notes = Array.prototype.slice.call(col.querySelectorAll('.lr-note'));
-    if (!notes.length) return;
-    notes.forEach(function(n) { n.__want = (parseFloat(n.dataset.top) || 0) / 100 * h; });
-    notes.sort(function(a, b) { return a.__want - b.__want; });
-    var gap = 8, prevBottom = 0;
-    notes.forEach(function(n) {
-      var top = Math.max(n.__want, prevBottom);
-      n.style.top = top + 'px';
-      prevBottom = top + n.offsetHeight + gap;
-    });
-    col.style.minHeight = Math.max(h, prevBottom) + 'px';
-  });
-};
+// ---- Interactive reader: drag a box on a page -> summarise that region ----
+// On mouseup the drag rect (page-relative 0-1 fractions) + page index are written
+// to the hidden #lr-selection textbox and the hidden #lr-summarize button is
+// clicked, which runs the server-side summary and re-renders the reader.
 (function() {
+  function setSelectionAndSubmit(page, rect) {
+    var ta = document.querySelector('#lr-selection textarea, #lr-selection input');
+    if (!ta) return;
+    ta.value = JSON.stringify({ page: page, rect: rect });
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    var btn = document.querySelector('#lr-summarize button');
+    if (btn) btn.click();
+  }
+
+  function attach(layer) {
+    if (layer.__lrDrag) return;
+    layer.__lrDrag = true;
+    var start = null, rubber = null;
+    layer.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      var r = layer.getBoundingClientRect();
+      start = { x: e.clientX - r.left, y: e.clientY - r.top };
+      rubber = document.createElement('div');
+      rubber.className = 'lr-rubber';
+      layer.appendChild(rubber);
+      e.preventDefault();
+    });
+    layer.addEventListener('mousemove', function(e) {
+      if (!start || !rubber) return;
+      var r = layer.getBoundingClientRect();
+      var x = e.clientX - r.left, y = e.clientY - r.top;
+      rubber.style.left = Math.min(start.x, x) + 'px';
+      rubber.style.top = Math.min(start.y, y) + 'px';
+      rubber.style.width = Math.abs(x - start.x) + 'px';
+      rubber.style.height = Math.abs(y - start.y) + 'px';
+    });
+    function finish(e) {
+      if (!start) return;
+      var r = layer.getBoundingClientRect();
+      var x = e.clientX - r.left, y = e.clientY - r.top;
+      var x0 = Math.min(start.x, x) / r.width, x1 = Math.max(start.x, x) / r.width;
+      var y0 = Math.min(start.y, y) / r.height, y1 = Math.max(start.y, y) / r.height;
+      if (rubber) { rubber.remove(); rubber = null; }
+      start = null;
+      if ((x1 - x0) > 0.01 && (y1 - y0) > 0.01) {
+        setSelectionAndSubmit(parseInt(layer.dataset.page, 10), [x0, y0, x1, y1]);
+      }
+    }
+    layer.addEventListener('mouseup', finish);
+    layer.addEventListener('mouseleave', function(e) { if (start) finish(e); });
+  }
+
   function hook() {
     var r = document.getElementById('reader');
     if (!r) { setTimeout(hook, 300); return; }
     var pending = null;
+    function scan() { r.querySelectorAll('.lr-drawlayer').forEach(attach); }
     new MutationObserver(function() {
       if (pending) clearTimeout(pending);
-      pending = setTimeout(function() {
-        r.querySelectorAll('.lr-page-img').forEach(function(img) {
-          if (!img.__lrHooked) { img.__lrHooked = true; img.addEventListener('load', window.lrLayoutNotes); }
-        });
-        window.lrLayoutNotes();
-      }, 120);
+      pending = setTimeout(scan, 100);
     }).observe(r, { childList: true, subtree: true });
+    scan();
   }
   hook();
-  var rt = null;
-  window.addEventListener('resize', function() {
-    if (rt) clearTimeout(rt);
-    rt = setTimeout(function() { if (window.lrLayoutNotes) window.lrLayoutNotes(); }, 150);
-  });
 })();
 </script>
 """
@@ -1396,6 +1382,12 @@ def build_ui() -> gr.Blocks:
         output = gr.HTML(value="", elem_id="output")
         reader = gr.HTML(value="", elem_id="reader")
 
+        # Interactive reader plumbing: per-session state + a hidden bridge the
+        # drag JS drives (writes the selection JSON, clicks the summarise button).
+        paper_state = gr.State(None)
+        selection = gr.Textbox(elem_id="lr-selection", show_label=False, container=False)
+        summarize_btn = gr.Button("summarize", elem_id="lr-summarize")
+
         # Update cost panel live when provider changes.
         def _on_provider_change(p):
             return render_cost_html(PROVIDERS[p]["model"])
@@ -1409,11 +1401,16 @@ def build_ui() -> gr.Blocks:
                 outputs=[status, output, cost],
             )
 
-        # Annotated reader shares the URL bar + provider, renders into #reader.
+        # Annotate = open the interactive PDF reader (draw a box -> layman summary).
         annotate_btn.click(
-            annotate.annotate_paper,
+            annotate.load_paper,
             inputs=[url, provider, force],
-            outputs=[status, reader],
+            outputs=[status, reader, cost, paper_state],
+        )
+        summarize_btn.click(
+            annotate.summarize_region,
+            inputs=[paper_state, selection, provider],
+            outputs=[reader, cost, paper_state],
         )
 
     return demo
