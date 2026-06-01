@@ -176,17 +176,6 @@ def load_arxiv_paper(arxiv_id: str) -> List[Document]:
 # ---- HTML renderers --------------------------------------------------------
 
 
-def render_actions_html() -> str:
-    """Card-level action(s). Paper link/export buttons live in the right rail
-    (see core.render_sidebar_actions_html); only the PNG capture stays here."""
-    return (
-        '<div class="action-row">'
-        '<button type="button" class="action-btn" onclick="exportCardsToPng()">'
-        '<span class="action-icon">📥</span> Export as PNG'
-        '</button>'
-        '</div>'
-    )
-
 def render_paper_header_html(
     title: str,
     authors: str,
@@ -219,11 +208,8 @@ def render_cards_html(
     header_html: str,
     hook: str,
     slides: List[Dict[str, Any]],
-    actions_html: str = "",
 ) -> str:
     parts = [header_html]
-    if actions_html:
-        parts.append(actions_html)
     if hook:
         parts.append(f'<div class="hook">{escape_with_bold(hook)}</div>')
     parts.append('<div class="card-grid">')
@@ -307,10 +293,8 @@ def generate_carousel(url: str, provider: str, force: bool = False):
             meta_c.get("published", ""), int(meta_c.get("pages", 0) or 0),
             bool(meta_c.get("truncated", False)),
         )
-        actions_c = render_actions_html()
         cards_c = render_cards_html(
             header_c, cached.get("hook", ""), cached.get("slides", []),
-            actions_html=actions_c,
         ) + render_recent_push(aid, title_c)
         yield (
             f"⚡ Cached — `{aid}` served instantly, 0 tokens used.",
@@ -420,7 +404,6 @@ def generate_carousel(url: str, provider: str, force: bool = False):
     paper_text = docs[0].page_content[:MAX_PAPER_CHARS]
     truncated = len(docs[0].page_content) > MAX_PAPER_CHARS
     header_html = render_paper_header_html(title, authors, published, pages, truncated)
-    actions_html = render_actions_html()
 
     yield (
         f"✅ Fetched in {fetch_dt:.1f}s. Generating carousel…",
@@ -525,7 +508,7 @@ def generate_carousel(url: str, provider: str, force: bool = False):
         slides = []
 
     cards_html = (
-        render_cards_html(header_html, hook, slides, actions_html=actions_html)
+        render_cards_html(header_html, hook, slides)
         + render_recent_push(aid, title)
     )
     total = time.monotonic() - t_start
@@ -831,13 +814,7 @@ body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em a
 }
 img.recent-push { width: 0; height: 0; }
 
-/* ---- Action buttons (Export / PDF / Zotero) ---- */
-.action-row {
-    display: flex;
-    gap: 0.6em;
-    flex-wrap: wrap;
-    margin: 1.2em 0 1em 0;
-}
+/* ---- Action buttons (sidebar: PDF / ArXiv / Zotero) ---- */
 .action-btn {
     display: inline-flex;
     align-items: center;
@@ -919,8 +896,17 @@ img.recent-push { width: 0; height: 0; }
     color: #374151;
     font-size: 1.1em;
 }
-/* Key phrases get a highlighter background (one per line). */
-.card p strong, .card-bullets strong {
+/* Summary line ("title"): key phrases underlined, no highlighter background. */
+.card p strong {
+    color: #3730a3;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: rgba(99,102,241,0.55);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 2px;
+}
+/* Bullets: key phrases keep the highlighter background (one per line). */
+.card-bullets strong {
     background: rgba(99,102,241,0.15);
     color: #3730a3;
     font-weight: 600;
@@ -993,12 +979,13 @@ img.recent-push { width: 0; height: 0; }
     align-items: stretch;   /* notes column matches the page image height */
     margin-bottom: 2.2em;
 }
-.lr-pagewrap { flex: 1 1 58%; min-width: 0; }
+.lr-pagewrap { flex: 1 1 58%; min-width: 0; overflow-x: auto; }
 .lr-page-num {
     font-size: 0.75em; font-weight: 600; color: #9ca3af;
     text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4em;
 }
-.lr-page { position: relative; display: block; }
+/* width scales with --lr-z (Cmd/Ctrl + wheel zoom); wrap scrolls when >100%. */
+.lr-page { position: relative; display: block; width: calc(100% * var(--lr-z, 1)); }
 .lr-page-img {
     width: 100%; display: block;
     border: 1px solid #e5e7eb; border-radius: 8px;
@@ -1008,6 +995,7 @@ img.recent-push { width: 0; height: 0; }
 #lr-selection, #lr-summarize, #lr-delete, #lr-delete-btn { display: none !important; }
 /* Transparent layer over each page that captures the rubber-band drag. */
 .lr-drawlayer { position: absolute; inset: 0; cursor: crosshair; z-index: 2; }
+body.lr-mod .lr-drawlayer { cursor: grab; }   /* ⌘/Ctrl held → pan affordance */
 .lr-rubber {
     position: absolute;
     border: 1.5px dashed #6366f1;
@@ -1021,9 +1009,17 @@ img.recent-push { width: 0; height: 0; }
     border: 1.5px dashed #f59e0b;
     background: rgba(245,158,11,0.13);
     border-radius: 4px;
-    pointer-events: none;
+    pointer-events: auto;   /* click to remove this queued selection */
+    cursor: pointer;
     z-index: 3;
 }
+.lr-pending-box:hover { background: rgba(239,68,68,0.16); border-color: #ef4444; }
+.lr-pending-box::after {
+    content: "✕";
+    position: absolute; top: 0; right: 3px;
+    font-size: 12px; font-weight: 700; color: #b45309; line-height: 1.2;
+}
+.lr-pending-box:hover::after { color: #ef4444; }
 /* Floating toolbar shown while pending regions exist. */
 .lr-pending-bar {
     position: fixed;
@@ -1148,7 +1144,6 @@ window.MathJax = {
 };
 </script>
 <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 (function() {
   function setup() {
@@ -1239,13 +1234,13 @@ window.LITREAD_RECENT = {
     this.applyCollapsed();
   },
   load: function(aid) {
+    // Fill the URL bar only; user decides whether to generate.
     var ta = document.querySelector('#url-box textarea');
     if (ta) {
       ta.value = 'https://arxiv.org/abs/' + aid;
       ta.dispatchEvent(new Event('input', { bubbles: true }));
+      ta.focus();
     }
-    var btn = document.querySelector('#generate-row button');
-    if (btn) btn.click();
   }
 };
 function __mountRecent() {
@@ -1260,38 +1255,6 @@ if (document.readyState === 'loading') {
 } else {
   __mountRecent();
 }
-
-// ---- Export rendered cards to PNG via html2canvas -----------------------
-window.exportCardsToPng = async function() {
-  var target = document.getElementById('output');
-  if (!target || !window.html2canvas) {
-    alert('Export library not loaded yet — please retry in a moment.');
-    return;
-  }
-  // Hide the action row during capture so the PNG is clean.
-  var actions = target.querySelector('.action-row');
-  var prev = actions ? actions.style.display : null;
-  if (actions) actions.style.display = 'none';
-  try {
-    var canvas = await html2canvas(target, {
-      scale: 2,
-      backgroundColor: '#ffffff',
-      useCORS: true,
-      logging: false
-    });
-    var link = document.createElement('a');
-    link.download = 'arxiv-carousel.png';
-    link.href = canvas.toDataURL('image/png');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  } catch (err) {
-    console.error(err);
-    alert('Export failed: ' + err.message);
-  } finally {
-    if (actions) actions.style.display = prev;
-  }
-};
 
 // ---- Annotated reader: click a note to scroll to + flash its box --------
 window.lrFlash = function(id) {
@@ -1378,6 +1341,11 @@ window.lrLayoutNotes = function() {
     pending = [];
     toolbar();
   }
+  function removePending(entry) {   // undo a single queued selection
+    if (entry.el) entry.el.remove();
+    pending = pending.filter(function(p) { return p !== entry; });
+    toolbar();
+  }
   function submitPending() {
     if (!pending.length) return;
     var regions = pending.map(function(p) { return { page: p.page, rect: p.rect }; });
@@ -1400,8 +1368,9 @@ window.lrLayoutNotes = function() {
 
     layer.addEventListener('mousedown', function(e) {
       if (e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey) return;   // ⌘/Ctrl+drag pans the page (handled separately)
       var r = layer.getBoundingClientRect();
-      start = { x: e.clientX - r.left, y: e.clientY - r.top, add: (e.metaKey || e.ctrlKey) };
+      start = { x: e.clientX - r.left, y: e.clientY - r.top };
       rubber = document.createElement('div');
       rubber.className = 'lr-rubber';
       layer.appendChild(rubber);
@@ -1435,7 +1404,6 @@ window.lrLayoutNotes = function() {
 
     function finish(e) {
       if (!start) return;
-      var add = start.add || e.metaKey || e.ctrlKey;
       var r = layer.getBoundingClientRect();
       var x = e.clientX - r.left, y = e.clientY - r.top;
       var rect = [Math.min(start.x, x) / r.width, Math.min(start.y, y) / r.height,
@@ -1446,17 +1414,20 @@ window.lrLayoutNotes = function() {
       var hit = savedHit(rect);
       if (hit) { if (hit.id) window.lrFlash(hit.id); return; }   // overlaps a saved annotation
       if (pendingHit(rect)) return;                              // overlaps a pending region
-      if (add) {
-        var el = document.createElement('div');
-        el.className = 'lr-pending-box';
-        el.style.left = (rect[0] * 100) + '%'; el.style.top = (rect[1] * 100) + '%';
-        el.style.width = ((rect[2] - rect[0]) * 100) + '%'; el.style.height = ((rect[3] - rect[1]) * 100) + '%';
-        pageEl.appendChild(el);
-        pending.push({ page: pno, rect: rect, el: el });
-        toolbar();
-      } else {
-        submitRegions([{ page: pno, rect: rect }]);
-      }
+      // Queue the region; the Summarise toolbar combines all queued boxes into one annotation.
+      var el = document.createElement('div');
+      el.className = 'lr-pending-box';
+      el.title = 'Click to remove this selection';
+      el.style.left = (rect[0] * 100) + '%'; el.style.top = (rect[1] * 100) + '%';
+      el.style.width = ((rect[2] - rect[0]) * 100) + '%'; el.style.height = ((rect[3] - rect[1]) * 100) + '%';
+      pageEl.appendChild(el);
+      var entry = { page: pno, rect: rect, el: el };
+      el.addEventListener('mousedown', function(ev) {   // click a queued box to undo it
+        ev.stopPropagation(); ev.preventDefault();
+        removePending(entry);
+      });
+      pending.push(entry);
+      toolbar();
     }
     layer.addEventListener('mouseup', finish);
     layer.addEventListener('mouseleave', function(e) { if (start) finish(e); });
@@ -1483,6 +1454,56 @@ window.lrLayoutNotes = function() {
     scan();
   }
   hook();
+
+  // ---- Cmd/Ctrl + wheel zooms the page under the cursor (also trackpad pinch,
+  // which fires wheel with ctrlKey). Page width scales via --lr-z; the wrap
+  // scrolls horizontally. Coords stay valid (drag math is % of live size). ----
+  document.addEventListener('wheel', function(e) {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    var page = e.target && e.target.closest ? e.target.closest('.lr-page') : null;
+    if (!page) return;
+    e.preventDefault();
+    var z = parseFloat(page.style.getPropertyValue('--lr-z')) || 1;
+    z = Math.min(4, Math.max(1, z - e.deltaY * 0.0025));
+    page.style.setProperty('--lr-z', z);
+    if (window.lrLayoutNotes) window.lrLayoutNotes();
+  }, { passive: false });
+
+  // ---- ⌘/Ctrl + drag pans the page: grab to scroll a zoomed page (horizontal
+  // within its wrap, vertical via the window). ⌘/Ctrl makes the rubber-band drag
+  // bail (see attach), so the two never fight. ----
+  var pan = null;
+  document.addEventListener('mousedown', function(e) {
+    if (e.button !== 0 || !(e.metaKey || e.ctrlKey)) return;
+    var page = e.target && e.target.closest ? e.target.closest('.lr-page') : null;
+    if (!page) return;
+    pan = { x: e.clientX, y: e.clientY, wrap: page.closest('.lr-pagewrap') };
+    document.body.style.userSelect = 'none';
+    if (pan.wrap) pan.wrap.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (!pan) return;
+    var dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+    pan.x = e.clientX; pan.y = e.clientY;
+    if (pan.wrap) pan.wrap.scrollLeft -= dx;
+    window.scrollBy(0, -dy);
+    e.preventDefault();
+  });
+  document.addEventListener('mouseup', function() {
+    if (!pan) return;
+    if (pan.wrap) pan.wrap.style.cursor = '';
+    document.body.style.userSelect = '';
+    pan = null;
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Meta' || e.key === 'Control') document.body.classList.add('lr-mod');
+  });
+  document.addEventListener('keyup', function(e) {
+    if (e.key === 'Meta' || e.key === 'Control') document.body.classList.remove('lr-mod');
+  });
+  window.addEventListener('blur', function() { document.body.classList.remove('lr-mod'); });
+
   var rzt = null;
   window.addEventListener('resize', function() {
     if (rzt) clearTimeout(rzt);

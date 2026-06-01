@@ -26,7 +26,7 @@ from core import PROVIDERS
 
 PAGE_ZOOM = 2.0                 # rasterise pages at 2x for a crisp base image
 MAX_FETCH_RETRIES = 4
-SUMMARY_CACHE_VERSION = "v3"     # bump to invalidate cached region summaries
+SUMMARY_CACHE_VERSION = "v4"     # bump to invalidate cached region summaries
 MIN_SELECTION_FRAC = 0.01       # ignore drags smaller than 1% of the page
 MAX_REGION_CHARS = 8000         # safety cap on text sent to the LLM per selection
 PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
@@ -38,9 +38,8 @@ simple but accurate, never academic.
 
 The user selected a region of a research paper; you are given the text from that region.
 Explain it in this EXACT shape:
-- FIRST line: a clear, COMPLETE one-sentence summary of the selection in plain words. Keep
-  every word the sentence needs to make sense — do not clip it into a vague fragment. No "- "
-  prefix, no markdown heading.
+- FIRST line: a SHORT headline title (max ~6 words) capturing the gist — a punchy phrase, not a
+  full sentence. No "- " prefix, no markdown heading.
 - THEN 2 to 4 bullet lines, each starting with "- ", one simple idea per bullet.
 
 In each bullet, wrap the ONE most important phrase in **double asterisks** to highlight it.
@@ -248,8 +247,9 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
     parts = [
         f'<div class="lr-header"><h2 class="lr-title">{title}</h2>'
         f'<p class="lr-authors">{authors}</p></div>',
-        '<div class="lr-hint">Drag a box to summarise a region. Hold <b>⌘/Ctrl</b> and drag to '
-        'add more regions (even across pages), then click <b>Summarise</b> to combine them.</div>',
+        '<div class="lr-hint">Drag a box to select a region — drag several, then click '
+        '<b>Summarise</b> to combine them into one annotation (even across pages). Click a queued '
+        'box to remove it. <b>⌘/Ctrl</b> + scroll to zoom a page; <b>⌘/Ctrl</b> + drag to pan.</div>',
     ]
 
     for pm in state["pages_meta"]:
