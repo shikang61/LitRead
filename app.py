@@ -55,7 +55,7 @@ MAX_PAPER_CHARS = 200_000
 MAX_FETCH_RETRIES = 4
 
 # Bump this whenever CAROUSEL_PROMPT changes — invalidates cached carousels.
-PROMPT_VERSION = "v5"
+PROMPT_VERSION = "v6"
 
 # -----------------------------------------------------------------------------
 # System prompt — strict JSON output.
@@ -116,7 +116,12 @@ ACCURACY (highest priority — overrides every other rule):
 - If an aspect (e.g. "Future Work") is not discussed in the paper, OMIT that slide entirely.
   Do not fabricate plausible-sounding content to fill a slot.
 
-LANGUAGE (layman-first, jargon only when load-bearing):
+LANGUAGE (explain it to a smart 10-year-old):
+- You are an expert who explains hard ideas in the SIMPLEST possible words. Imagine teaching a
+  curious 10-year-old: short sentences, everyday words, concrete. Simple but accurate.
+- Prefer common words over academic ones: say "keeps track of what's going on" not "maintains
+  evolving state"; "works step by step over a long task" not "long-horizon multi-turn". If a
+  sentence is hard to read aloud, rewrite it simpler.
 - Write as if explaining to a curious friend over coffee, not in an academic abstract.
 - **Active voice, always.** Subject does the verb. Rewrite passive constructions:
   ✅ "The model learns from its own mistakes"
@@ -134,7 +139,8 @@ LANGUAGE (layman-first, jargon only when load-bearing):
   Use only when the paper itself emphasises them.
 
 CARD STRUCTURE:
-- Each `body`: ONE short sentence (max ~20 words) — a framing line, not a full explanation.
+- Each `body`: ONE short, SIMPLE sentence (max ~18 words) a 10-year-old could follow — a plain
+  framing line in everyday words, not an academic summary.
 - Each `bullets`: 2–4 punchy bullets (max ~12 words each). Use bullets to carry the substance.
 - `bullets` is optional — omit if a single short sentence in `body` covers the slide cleanly.
 
@@ -260,8 +266,7 @@ def render_cards_html(
             bullets = []
 
         card_inner = [
-            f'<div class="card-emoji">{emoji}</div>',
-            f'<h3>{title}</h3>',
+            f'<div class="card-head"><span class="card-emoji">{emoji}</span><h3>{title}</h3></div>',
         ]
         if body:
             card_inner.append(f'<p>{escape_with_bold(body)}</p>')
@@ -601,7 +606,7 @@ CSS = """
 #tagline { font-size: 17px !important; }
 #output .paper-title { font-size: 19px !important; }
 #output .hook { font-size: 17px !important; line-height: 1.4 !important; }
-#output .card-emoji { font-size: 30px !important; }
+#output .card-emoji { font-size: 19px !important; }
 #output .card h3 { font-size: 17px !important; }
 #output .card p { font-size: 14.5px !important; }
 #output .card-bullets, #output .card-bullets li { font-size: 14px !important; }
@@ -930,9 +935,11 @@ img.recent-push { width: 0; height: 0; }
     transform: translateY(-2px);
     box-shadow: 0 8px 18px rgba(0,0,0,0.08);
 }
-.card-emoji { font-size: 2.2em; line-height: 1; margin-bottom: 0.2em; }
+/* Emoji sits small, to the left of the card title. */
+.card-head { display: flex; align-items: center; gap: 0.45em; margin-bottom: 0.55em; }
+.card-emoji { font-size: 1.25em; line-height: 1; margin: 0; flex: 0 0 auto; }
 .card h3 {
-    margin: 0.1em 0 0.45em 0;
+    margin: 0;
     font-size: 1.55em;
     font-weight: 700;
     color: #0f172a;
@@ -941,9 +948,8 @@ img.recent-push { width: 0; height: 0; }
 .card p {
     margin: 0 0 0.4em 0;
     line-height: 1.55;
-    color: #1f2937;
+    color: #374151;
     font-size: 1.1em;
-    font-weight: 600;            /* the card's summary line reads as a bold lead */
 }
 /* Key phrases get a highlighter background (one per line). */
 .card p strong, .card-bullets strong {
@@ -955,7 +961,6 @@ img.recent-push { width: 0; height: 0; }
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
 }
-.card p strong { font-weight: 700; }
 .card-bullets {
     margin: 0.7em 0 0 0;
     padding-left: 0;
