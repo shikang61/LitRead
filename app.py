@@ -11,7 +11,6 @@ Pipeline:
 import html
 import os
 import queue
-import re
 import threading
 import time
 import warnings
