@@ -628,6 +628,7 @@ CSS = """
     width: 100% !important;
     margin: 0 auto !important;
     padding: 1em 2em !important;
+    font-size: 15px !important;   /* base text 1pt smaller; em-based content scales down */
 }
 
 /* Force a clean, highly-legible font across the whole app, including injected HTML. */
@@ -1044,16 +1045,16 @@ img.recent-push { width: 0; height: 0; }
 }
 .lr-box {
     position: absolute;
-    border: 2px solid #6366f1;
+    outline: 2px solid #6366f1;
+    outline-offset: 3px;        /* push the border off the text so highlights aren't blocked */
     border-radius: 5px;
     background: rgba(99,102,241,0.06);
     pointer-events: none;
     box-sizing: border-box;
     transition: box-shadow 0.2s ease, background 0.2s ease;
 }
-.lr-box-equation { border-color: #f59e0b; background: rgba(245,158,11,0.07); }
-.lr-box-figure   { border-color: #10b981; background: rgba(16,185,129,0.07); }
-.lr-box-section  { border-color: #0ea5e9; border-style: dashed; background: rgba(14,165,233,0.06); }
+.lr-box-equation { outline-color: #f59e0b; background: rgba(245,158,11,0.07); }
+.lr-box-figure   { outline-color: #10b981; background: rgba(16,185,129,0.07); }
 .lr-box-num {
     position: absolute;
     top: -11px; left: -11px;
@@ -1066,7 +1067,6 @@ img.recent-push { width: 0; height: 0; }
 }
 .lr-box-equation .lr-box-num { background: #f59e0b; }
 .lr-box-figure   .lr-box-num { background: #10b981; }
-.lr-box-section  .lr-box-num { background: #0ea5e9; }
 .lr-hl {
     position: absolute;
     background: rgba(250,204,21,0.45);
@@ -1109,7 +1109,6 @@ img.recent-push { width: 0; height: 0; }
 }
 .lr-kind-equation { color: #b45309; background: #fef3c7; }
 .lr-kind-figure   { color: #047857; background: #d1fae5; }
-.lr-kind-section  { color: #0369a1; background: #e0f2fe; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }

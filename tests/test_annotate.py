@@ -88,10 +88,11 @@ def test_parse_annotations_defaults_kind_and_coerces_keywords():
     assert out[0]["keywords"] == []
 
 
-def test_parse_annotations_keeps_section_kind():
-    raw = '{"annotations": [{"block_id": "p0_b0", "kind": "section", "note": "what this section does"}]}'
+def test_parse_annotations_section_kind_coerced_to_paragraph():
+    # "section" is no longer a valid kind — it falls back to "paragraph".
+    raw = '{"annotations": [{"block_id": "p0_b0", "kind": "section", "note": "x"}]}'
     out = annotate.parse_annotations(raw, VALID)
-    assert out[0]["kind"] == "section"
+    assert out[0]["kind"] == "paragraph"
 
 
 def test_parse_annotations_tolerates_code_fence():
