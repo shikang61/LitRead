@@ -316,8 +316,10 @@ def render_reader_html(
 
         notes: List[str] = []
         for e in page_anns:
+            top = e["box"]["top"]
             notes.append(
                 f'<div class="lr-note" id="lr-note-{e["n"]}" data-target="lr-box-{e["n"]}" '
+                f'data-top="{round(top, 2)}" style="top:{_pct(top)}" '
                 f'onclick="lrFlash(\'lr-box-{e["n"]}\')">'
                 f'<span class="lr-note-num">{e["n"]}</span>'
                 f'<span class="lr-note-body">'
