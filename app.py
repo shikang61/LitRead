@@ -44,6 +44,8 @@ from core import (
     strip_references,
 )
 
+import annotate
+
 # -----------------------------------------------------------------------------
 # Config (carousel-specific; shared config lives in core.py)
 # -----------------------------------------------------------------------------
@@ -965,6 +967,96 @@ img.recent-push { width: 0; height: 0; }
     max-height: 300px;
     overflow: auto;
 }
+
+/* ---- Annotated reader ---- */
+#reader { max-width: 1100px; margin: 0 auto 3em auto; }
+.lr-header { margin: 0.5em 0 1.2em 0; }
+.lr-title { margin: 0 0 0.3em 0; font-size: 1.4em; line-height: 1.25; color: #0f172a; }
+.lr-authors { margin: 0; color: #6b7280; }
+.lr-row {
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+    margin-bottom: 2.2em;
+}
+.lr-pagewrap { flex: 1 1 58%; min-width: 0; }
+.lr-page-num {
+    font-size: 0.75em; font-weight: 600; color: #9ca3af;
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4em;
+}
+.lr-page { position: relative; display: block; }
+.lr-page-img {
+    width: 100%; display: block;
+    border: 1px solid #e5e7eb; border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+.lr-box {
+    position: absolute;
+    border: 2px solid #6366f1;
+    border-radius: 5px;
+    background: rgba(99,102,241,0.06);
+    pointer-events: none;
+    box-sizing: border-box;
+    transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+.lr-box-equation { border-color: #f59e0b; background: rgba(245,158,11,0.07); }
+.lr-box-figure   { border-color: #10b981; background: rgba(16,185,129,0.07); }
+.lr-box-num {
+    position: absolute;
+    top: -11px; left: -11px;
+    width: 22px; height: 22px;
+    background: #6366f1; color: #fff;
+    border-radius: 50%;
+    font-size: 0.72em; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+.lr-box-equation .lr-box-num { background: #f59e0b; }
+.lr-box-figure   .lr-box-num { background: #10b981; }
+.lr-hl {
+    position: absolute;
+    background: rgba(250,204,21,0.45);
+    mix-blend-mode: multiply;
+    border-radius: 2px;
+    pointer-events: none;
+}
+.lr-box.lr-flash {
+    box-shadow: 0 0 0 4px rgba(99,102,241,0.45);
+    background: rgba(99,102,241,0.18);
+}
+.lr-notes { flex: 1 1 42%; min-width: 0; display: flex; flex-direction: column; gap: 0.5em; }
+.lr-note {
+    display: flex; gap: 0.6em; align-items: flex-start;
+    padding: 0.6em 0.8em;
+    border: 1px solid #e5e7eb; border-radius: 10px;
+    background: #fff; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.lr-note:hover { background: #eef2ff; border-color: #6366f1; transform: translateX(2px); }
+.lr-note-num {
+    flex: 0 0 auto;
+    width: 22px; height: 22px;
+    background: #6366f1; color: #fff; border-radius: 50%;
+    font-size: 0.72em; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 0.1em;
+}
+.lr-note-body { display: flex; flex-direction: column; gap: 0.25em; }
+.lr-kind {
+    align-self: flex-start;
+    font-size: 0.62em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    color: #4f46e5; background: #eef2ff;
+    padding: 0.12em 0.55em; border-radius: 99px;
+}
+.lr-kind-equation { color: #b45309; background: #fef3c7; }
+.lr-kind-figure   { color: #047857; background: #d1fae5; }
+.lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
+.lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
+.lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
+@media (max-width: 860px) {
+    .lr-row { flex-direction: column; }
+    .lr-pagewrap, .lr-notes { flex: 1 1 100%; width: 100%; }
+}
 """
 
 
@@ -1113,6 +1205,15 @@ window.exportCardsToPng = async function() {
     if (actions) actions.style.display = prev;
   }
 };
+
+// ---- Annotated reader: click a note to scroll to + flash its box --------
+window.lrFlash = function(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('lr-flash');
+  setTimeout(function() { el.classList.remove('lr-flash'); }, 1500);
+};
 </script>
 """
 
@@ -1156,9 +1257,11 @@ def build_ui() -> gr.Blocks:
             )
             with gr.Row(elem_id="generate-row"):
                 generate_btn = gr.Button("✨ Generate Carousel", variant="primary")
+                annotate_btn = gr.Button("🔎 Annotate Paper", variant="secondary")
 
         status = gr.Markdown("_Ready._", elem_id="status")
         output = gr.HTML(value="", elem_id="output")
+        reader = gr.HTML(value="", elem_id="reader")
 
         # Update cost panel live when provider changes.
         def _on_provider_change(p):
@@ -1173,6 +1276,13 @@ def build_ui() -> gr.Blocks:
                 outputs=[status, output, cost],
             )
 
+        # Annotated reader shares the URL bar + provider, renders into #reader.
+        annotate_btn.click(
+            annotate.annotate_paper,
+            inputs=[url, provider],
+            outputs=[status, reader],
+        )
+
     return demo
 
 
@@ -1185,7 +1295,7 @@ if __name__ == "__main__":
         server_port=int(os.environ.get("PORT", 7860)),
         ssr_mode=False,  # SSR breaks streaming generators on HF Spaces
         favicon_path="static/favicon-32.png",
-        allowed_paths=["static"],
+        allowed_paths=["static", core.CACHE_DIR],
         theme=gr.themes.Soft(
             text_size=gr.themes.sizes.text_lg,
             font=[
