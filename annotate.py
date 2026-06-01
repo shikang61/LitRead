@@ -275,17 +275,6 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
 # -----------------------------------------------------------------------------
 # LLM summary
 # -----------------------------------------------------------------------------
-def _summarize_text(text: str, provider: str, api_key: str):
-    llm = core.make_llm(provider, api_key, streaming=False)
-    resp = llm.invoke([
-        SystemMessage(content=REGION_PROMPT),
-        HumanMessage(content=f"SELECTED TEXT:\n\n{text[:MAX_REGION_CHARS]}"),
-    ])
-    usage = getattr(resp, "usage_metadata", None) or {}
-    summary = (getattr(resp, "content", "") or "").strip()
-    return summary, usage.get("input_tokens", 0) or 0, usage.get("output_tokens", 0) or 0
-
-
 # -----------------------------------------------------------------------------
 # Gradio callbacks
 # -----------------------------------------------------------------------------
@@ -368,37 +357,62 @@ def delete_summary(state: Optional[Dict[str, Any]], n_json: str, provider: str):
 
 
 def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provider: str):
-    """Summarise the text under one or more drawn boxes (combined). Returns
-    (reader_html, cost_html, state)."""
+    """Summarise the text under one or more drawn boxes, streaming the result.
+    Generator yielding (reader_html, cost_html, state)."""
     model = PROVIDERS[provider]["model"]
     if not state or not state.get("pdf_bytes"):
-        return _placeholder(), core.render_cost_html(model), state
-
-    def _out(st):
-        return _render_out(st, provider)
+        yield _placeholder(), core.render_cost_html(model), state
+        return
 
     regions = parse_regions(selection_json, len(state["pages_meta"]))
     if not regions:
-        return _out(state)  # malformed/tiny selection — ignore
+        yield _render_out(state, provider)            # malformed/tiny selection — ignore
+        return
 
     text = extract_regions_text(state["pdf_bytes"], regions)
     if not text:
         new = append_summary(state, regions, "", "No selectable text in that region.", 0, 0)
         _persist_summaries(new, provider)
-        return _out(new)
+        yield _render_out(new, provider)
+        return
 
     env_key = PROVIDERS[provider]["env_key"]
     api_key = os.getenv(env_key, "").strip()
     if not api_key:
-        # Don't cache a transient "set your key" message.
-        return _out(append_summary(state, regions, text, f"⚠️ Set {env_key} in .env to summarise.", 0, 0))
+        yield _render_out(append_summary(state, regions, text, f"⚠️ Set {env_key} in .env to summarise.", 0, 0), provider)
+        return
 
+    # Placeholder card shows immediately, then we stream tokens into it.
+    work = append_summary(state, regions, text, "⏳ Summarising…", 0, 0)
+    idx = len(work["summaries"]) - 1
+    yield _render_out(work, provider)
+
+    base_in, base_out = state.get("in_tok", 0), state.get("out_tok", 0)
+    buffer = ""
+    in_tok = out_tok = 0
     try:
-        summary, in_tok, out_tok = _summarize_text(text, provider, api_key)
+        llm = core.make_llm(provider, api_key, streaming=True)
+        msgs = [SystemMessage(content=REGION_PROMPT),
+                HumanMessage(content=f"SELECTED TEXT:\n\n{text[:MAX_REGION_CHARS]}")]
+        last = time.monotonic()
+        for chunk in llm.stream(msgs):
+            buffer += getattr(chunk, "content", "") or ""
+            usage = getattr(chunk, "usage_metadata", None)
+            if usage:
+                in_tok = usage.get("input_tokens", in_tok) or in_tok
+                out_tok = usage.get("output_tokens", out_tok) or out_tok
+            now = time.monotonic()
+            if now - last > 0.4 and buffer.strip():
+                work["summaries"][idx]["summary"] = buffer
+                work["in_tok"], work["out_tok"] = base_in + in_tok, base_out + out_tok
+                last = now
+                yield _render_out(work, provider)
     except Exception as e:
-        # Don't cache a transient error.
-        return _out(append_summary(state, regions, text, f"⚠️ Summary failed: {type(e).__name__}: {e}", 0, 0))
+        work["summaries"][idx]["summary"] = f"⚠️ Summary failed: {type(e).__name__}: {e}"
+        yield _render_out(work, provider)
+        return
 
-    new = append_summary(state, regions, text, summary, in_tok, out_tok)
-    _persist_summaries(new, provider)
-    return _out(new)
+    work["summaries"][idx]["summary"] = buffer.strip() or "(no summary returned)"
+    work["in_tok"], work["out_tok"] = base_in + in_tok, base_out + out_tok
+    _persist_summaries(work, provider)
+    yield _render_out(work, provider)
