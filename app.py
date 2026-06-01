@@ -55,7 +55,7 @@ MAX_PAPER_CHARS = 200_000
 MAX_FETCH_RETRIES = 4
 
 # Bump this whenever CAROUSEL_PROMPT changes — invalidates cached carousels.
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 # -----------------------------------------------------------------------------
 # System prompt — strict JSON output.
@@ -139,10 +139,13 @@ CARD STRUCTURE:
 - `bullets` is optional — omit if a single short sentence in `body` covers the slide cleanly.
 
 FORMATTING:
-- **MANDATORY bold** — every `body` and every bullet MUST wrap at least 4 key terms in markdown bold
-  using DOUBLE asterisks: `**term**`. Pick the most important concept, method name, dataset,
-  model, or metric in each line. Do NOT bold whole phrases — single terms only.
-  Example bullet: `"Beats **GPT-4** by **+15.2 pp** on **MMLU**"`.
+- **Highlight ONE key phrase per line** — in every `body` line and every bullet, wrap EXACTLY ONE
+  short phrase (the single most important idea, ~1-4 words) in markdown bold using DOUBLE
+  asterisks: `**phrase**`. Exactly one per line — never more, never zero.
+- Highlight the load-bearing CONCEPT or RESULT, not proper names. Do NOT highlight model,
+  dataset, or method names (e.g. LongDS, Gemini-3.1-Pro, MMLU) UNLESS that name itself is the
+  point of the line. Prefer e.g. `**state drift**`, `**48% accuracy**`, `**long-horizon errors**`.
+  Example bullet: `"Accuracy drops to **48%** as runs get longer"`.
 - Output ONLY the JSON object — no prose before/after, no markdown fences.
 - You MAY use LaTeX for math: `$x = y^2$` for inline, `$$E = mc^2$$` for display. Keep equations short.
   When emitting LaTeX in JSON strings, escape backslashes as `\\\\` (e.g. `\\\\frac{a}{b}`).
@@ -938,20 +941,31 @@ img.recent-push { width: 0; height: 0; }
 .card p {
     margin: 0 0 0.4em 0;
     line-height: 1.55;
-    color: #374151;
+    color: #1f2937;
     font-size: 1.1em;
+    font-weight: 600;            /* the card's summary line reads as a bold lead */
 }
+/* Key phrases get a highlighter background (one per line). */
 .card p strong, .card-bullets strong {
-    color: #4f46e5;
+    background: rgba(99,102,241,0.15);
+    color: #3730a3;
     font-weight: 600;
+    border-radius: 4px;
+    padding: 0.02em 0.28em;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
 }
+.card p strong { font-weight: 700; }
 .card-bullets {
-    margin: 0.1em 0 0 0;
+    margin: 0.7em 0 0 0;
     padding-left: 0;
+    padding-top: 0.7em;
+    border-top: 1px solid #eef0f4;   /* faint separator under the summary line */
     list-style: none;
     color: #374151;
     font-size: 1.05em;
     line-height: 1.5;
+    font-weight: 400;
 }
 .card-bullets li {
     position: relative;
