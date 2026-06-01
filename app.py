@@ -767,14 +767,14 @@ CSS = """
 :root { --lr-gutter: 0px; }
 #recent-papers {
     position: fixed;
-    top: 90px;
+    top: 116px;                 /* sit below the LitRead title row */
     left: 0;
     width: 240px;
-    max-height: calc(100vh - 110px);
+    max-height: calc(100vh - 136px);
     overflow-y: auto;
     overflow-x: hidden;
     padding: 1em 0.9em 1em 1em;
-    z-index: 10;
+    z-index: 5;
     transition: width 0.2s ease, padding 0.2s ease;
 }
 /* Collapse / expand chevron (glyph supplied by ::before per state). */
@@ -791,7 +791,7 @@ CSS = """
 .recent-toggle:hover { background: #eef2ff; color: #6366f1; }
 body:not(.lr-rail-collapsed) .recent-toggle::before { content: '‹'; }
 body.lr-rail-collapsed .recent-toggle::before { content: '›'; }
-.recent-collapsed-icon { display: none; font-size: 1.35em; cursor: pointer; margin-top: 2.6em; text-align: center; }
+.recent-collapsed-icon { display: none; font-size: 1.35em; cursor: pointer; margin-top: 0.3em; text-align: center; }
 body.lr-rail-collapsed .recent-collapsed-icon { display: block; }
 .recent-header {
     font-size: 0.85em;
@@ -839,9 +839,17 @@ body.lr-rail-collapsed .recent-collapsed-icon { display: block; }
     font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
 }
 /* Collapsed: shrink to a thin strip, hide the body, centre the toggle. */
-body.lr-rail-collapsed #recent-papers { width: 48px; padding-left: 0; padding-right: 0; }
+body.lr-rail-collapsed #recent-papers {
+    width: 46px !important;
+    padding: 0.5em 0 !important;
+    background: #f3f4f6;
+    border-right: 1px solid #e5e7eb;
+    border-radius: 0 10px 10px 0;
+    box-shadow: 1px 0 3px rgba(0,0,0,0.04);
+}
 body.lr-rail-collapsed .recent-body { display: none; }
-body.lr-rail-collapsed .recent-toggle { right: 50%; transform: translateX(50%); top: 0.5em; }
+/* In the thin strip the toggle flows at the top-centre (no fragile offsets). */
+body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em auto; }
 
 /* Reserve a left gutter for the rail and offset the centred content into it so
    the rail can never overlap the search bar/output. Viewport-based + shrink-to-
@@ -850,10 +858,13 @@ body.lr-rail-collapsed .recent-toggle { right: 50%; transform: translateX(50%); 
     :root { --lr-gutter: 256px; }                  /* 240 rail + 16 gap */
     body.lr-rail-collapsed { --lr-gutter: 64px; }  /* 48 strip + 16 gap */
     #center-stack, #status, #output, #reader {
-        margin-left: var(--lr-gutter) !important;
+        margin-left: auto !important;
         margin-right: auto !important;
-        max-width: min(1100px, calc(100vw - var(--lr-gutter) - 4em)) !important;
-        transition: margin-left 0.2s ease, max-width 0.2s ease;
+        /* Symmetric shrink by 2x the gutter keeps content screen-centred AND
+           clear of the fixed rail: a centred block's left edge = gutter + 2em,
+           which is always wider than the rail. */
+        max-width: min(1100px, calc(100vw - var(--lr-gutter) * 2 - 4em)) !important;
+        transition: max-width 0.2s ease;
     }
 }
 /* Hide the rail on narrow screens (no recents UI); content uses full width. */
