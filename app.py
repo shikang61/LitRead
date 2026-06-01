@@ -1123,6 +1123,9 @@ img.recent-push { width: 0; height: 0; }
 .lr-bullets li { position: relative; padding-left: 0.85em; margin: 0.18em 0; line-height: 1.4; font-size: 0.95em; }
 .lr-bullets li::before { content: "•"; color: #6366f1; position: absolute; left: 0; top: 0; }
 .lr-bullets strong { color: #4f46e5; font-weight: 600; }
+.lr-note-title { font-weight: 700; color: #0f172a; line-height: 1.35; margin-bottom: 0.4em; }
+.lr-note-title strong { color: #4f46e5; }
+#reader .lr-note-title { font-size: 14px !important; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
@@ -1340,8 +1343,8 @@ window.lrLayoutNotes = function() {
   });
 };
 
-// ---- Interactive reader: drag to summarise; Shift+drag to add regions -------
-// Plain drag -> one-region summary. Shift+drag -> add a pending region (amber
+// ---- Interactive reader: drag to summarise; Cmd/Ctrl+drag to add regions ----
+// Plain drag -> one-region summary. Cmd/Ctrl+drag -> add a pending region (amber
 // dashed box); the toolbar's "Summarise" combines all pending regions into one
 // annotation. Submits send {regions:[{page,rect}, ...]} to #lr-selection.
 (function() {
@@ -1405,7 +1408,7 @@ window.lrLayoutNotes = function() {
     layer.addEventListener('mousedown', function(e) {
       if (e.button !== 0) return;
       var r = layer.getBoundingClientRect();
-      start = { x: e.clientX - r.left, y: e.clientY - r.top, shift: e.shiftKey };
+      start = { x: e.clientX - r.left, y: e.clientY - r.top, add: (e.metaKey || e.ctrlKey) };
       rubber = document.createElement('div');
       rubber.className = 'lr-rubber';
       layer.appendChild(rubber);
@@ -1439,7 +1442,7 @@ window.lrLayoutNotes = function() {
 
     function finish(e) {
       if (!start) return;
-      var shift = start.shift || e.shiftKey;
+      var add = start.add || e.metaKey || e.ctrlKey;
       var r = layer.getBoundingClientRect();
       var x = e.clientX - r.left, y = e.clientY - r.top;
       var rect = [Math.min(start.x, x) / r.width, Math.min(start.y, y) / r.height,
@@ -1450,7 +1453,7 @@ window.lrLayoutNotes = function() {
       var hit = savedHit(rect);
       if (hit) { if (hit.id) window.lrFlash(hit.id); return; }   // overlaps a saved annotation
       if (pendingHit(rect)) return;                              // overlaps a pending region
-      if (shift) {
+      if (add) {
         var el = document.createElement('div');
         el.className = 'lr-pending-box';
         el.style.left = (rect[0] * 100) + '%'; el.style.top = (rect[1] * 100) + '%';
