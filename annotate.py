@@ -246,8 +246,10 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
 
         cards = []
         for s in cards_by_page.get(pno, []):
+            top0 = _regions_of(s)[0]["rect"][1]
             cards.append(
                 f'<div class="lr-note" id="lr-note-{s["n"]}" data-target="lr-box-{s["n"]}" '
+                f'data-top="{round(top0 * 100, 2)}" style="top:{_pct(top0)}" '
                 f'onclick="lrFlash(\'lr-box-{s["n"]}\')">'
                 f'<span class="lr-note-num">{s["n"]}</span>'
                 f'<span class="lr-note-body">{_bullets_html(s["summary"])}</span>'

@@ -32,23 +32,31 @@ urllib.request.install_opener(_opener)
 # -----------------------------------------------------------------------------
 OPENAI_MODEL = "gpt-5.4"
 GROK_MODEL = "grok-4.3"
+GROK_REASONING_MODEL = "grok-4.20-0309-reasoning"
 GROK_BASE_URL = "https://api.x.ai/v1"
 
 # Per-1M-token pricing in USD.
 PRICING: Dict[str, Dict[str, float]] = {
     "gpt-5.4":  {"input": 5.00, "output": 15.00},
     "grok-4.3": {"input": 5.00, "output": 15.00},
+    "grok-4.20-0309-reasoning": {"input": 5.00, "output": 15.00},
 }
 
 # Context-window sizes (input tokens). Used by the cost panel meter.
 MODEL_CONTEXT: Dict[str, int] = {
     "gpt-5.4":  400_000,
     "grok-4.3": 256_000,
+    "grok-4.20-0309-reasoning": 256_000,
 }
 
 PROVIDERS = {
-    "Grok": {
+    "Grok 4.3": {
         "model": GROK_MODEL,
+        "base_url": GROK_BASE_URL,
+        "env_key": "XAI_API_KEY",
+    },
+    "Grok 4.20 Reasoning": {
+        "model": GROK_REASONING_MODEL,
         "base_url": GROK_BASE_URL,
         "env_key": "XAI_API_KEY",
     },

@@ -104,8 +104,8 @@ def test_summary_cache_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setattr(core, "CACHE_DIR", str(tmp_path))
     state = {"aid": "1234.5678", "model": "grok-4.3",
              "summaries": [{"n": 1, "page": 0, "rect": [0, 0, 1, 1], "text": "t", "summary": "s"}]}
-    annotate._persist_summaries(state, "Grok")
-    got = core.cache_get(annotate._summary_cache_key("1234.5678", "Grok", "grok-4.3"))
+    annotate._persist_summaries(state, "Grok 4.3")
+    got = core.cache_get(annotate._summary_cache_key("1234.5678", "Grok 4.3", "grok-4.3"))
     assert got["summaries"] == state["summaries"]
 
 
@@ -117,10 +117,10 @@ def test_delete_summary_removes_renumbers_and_recaches(monkeypatch, tmp_path):
                  {"n": 2, "page": 0, "rect": [0, 0, 1, 1], "text": "b", "summary": "B"},
                  {"n": 3, "page": 1, "rect": [0, 0, 1, 1], "text": "c", "summary": "C"},
              ]}
-    _, _, new = annotate.delete_summary(state, "2", "Grok")
+    _, _, new = annotate.delete_summary(state, "2", "Grok 4.3")
     assert [s["summary"] for s in new["summaries"]] == ["A", "C"]
     assert [s["n"] for s in new["summaries"]] == [1, 2]      # renumbered
-    got = core.cache_get(annotate._summary_cache_key("1", "Grok", "grok-4.3"))
+    got = core.cache_get(annotate._summary_cache_key("1", "Grok 4.3", "grok-4.3"))
     assert [s["summary"] for s in got["summaries"]] == ["A", "C"]
 
 
