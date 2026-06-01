@@ -1267,11 +1267,16 @@ window.lrFlash = function(id) {
 // clicked, which runs the server-side summary and re-renders the reader.
 (function() {
   function setSelectionAndSubmit(page, rect) {
-    var ta = document.querySelector('#lr-selection textarea, #lr-selection input');
+    var box = document.getElementById('lr-selection');
+    var ta = box ? (box.matches('textarea,input') ? box : box.querySelector('textarea, input')) : null;
     if (!ta) return;
-    ta.value = JSON.stringify({ page: page, rect: rect });
+    var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+    if (ta.tagName === 'TEXTAREA' && setter && setter.set) { setter.set.call(ta, JSON.stringify({ page: page, rect: rect })); }
+    else { ta.value = JSON.stringify({ page: page, rect: rect }); }
     ta.dispatchEvent(new Event('input', { bubbles: true }));
-    var btn = document.querySelector('#lr-summarize button');
+    // gr.Button puts the elem_id on the <button> itself.
+    var btn = document.getElementById('lr-summarize');
+    if (btn && btn.tagName !== 'BUTTON') btn = btn.querySelector('button') || btn;
     if (btn) btn.click();
   }
 
@@ -1368,8 +1373,7 @@ def build_ui() -> gr.Blocks:
                 elem_id="url-box",
             )
             with gr.Row(elem_id="generate-row"):
-                generate_btn = gr.Button("✨ Generate Carousel", variant="primary")
-                annotate_btn = gr.Button("🔎 Annotate Paper", variant="secondary")
+                generate_btn = gr.Button("✨ Generate Carousel + Reader", variant="primary")
             with gr.Row(elem_id="force-row"):
                 force = gr.Checkbox(
                     label="↻ Force regenerate (ignore cache)",
@@ -1395,18 +1399,19 @@ def build_ui() -> gr.Blocks:
         provider.change(_on_provider_change, inputs=[provider], outputs=[cost])
 
         for trigger in (url.submit, generate_btn.click):
-            trigger(
+            ev = trigger(
                 generate_carousel,
                 inputs=[url, provider, force],
                 outputs=[status, output, cost],
             )
+            # The same click also opens the interactive PDF reader below the cards.
+            ev.then(
+                annotate.load_reader,
+                inputs=[url, provider, force],
+                outputs=[reader, paper_state],
+            )
 
-        # Annotate = open the interactive PDF reader (draw a box -> layman summary).
-        annotate_btn.click(
-            annotate.load_paper,
-            inputs=[url, provider, force],
-            outputs=[status, reader, cost, paper_state],
-        )
+        # Draw a box on the reader -> summarise that region (updates API Usage).
         summarize_btn.click(
             annotate.summarize_region,
             inputs=[paper_state, selection, provider],

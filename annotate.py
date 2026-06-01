@@ -216,23 +216,20 @@ def _summarize_text(text: str, provider: str, api_key: str):
 # -----------------------------------------------------------------------------
 # Gradio callbacks
 # -----------------------------------------------------------------------------
-def load_paper(url: str, provider: str, force: bool = False):
-    """Fetch + rasterise a paper for interactive exploration. Generator yielding
-    (status_md, reader_html, cost_html, state)."""
+def load_reader(url: str, provider: str, force: bool = False):
+    """Fetch + rasterise a paper for interactive reading. Generator yielding
+    (reader_html, state). Runs alongside the carousel on the same button, so it
+    does not touch the shared status/cost panels (errors render in the reader)."""
     model = PROVIDERS[provider]["model"]
-    cost0 = core.render_cost_html(model)
-    loading = _placeholder("Loading paper…")
-
     aid = core.extract_arxiv_id(url)
     if not aid:
-        yield "❌ **Invalid URL.** Could not find an ArXiv ID.", _placeholder("Paste a valid ArXiv URL or ID."), cost0, None
+        yield _placeholder("Paste a valid ArXiv URL to load the PDF."), None
         return
 
-    t_start = time.monotonic()
+    yield _placeholder(f"Loading PDF for {aid} — drag a box once it appears…"), None
     pdf_bytes: Optional[bytes] = None
     meta: Optional[Dict[str, Any]] = None
     for attempt in range(MAX_FETCH_RETRIES):
-        yield f"⏳ Fetching paper `{aid}`… (attempt {attempt + 1}/{MAX_FETCH_RETRIES})", loading, cost0, None
         try:
             pdf_bytes, meta = core.fetch_pdf(aid)
             break
@@ -241,43 +238,29 @@ def load_paper(url: str, provider: str, force: bool = False):
             retryable = status == 429 or (isinstance(status, int) and 500 <= status < 600)
             if retryable and attempt < MAX_FETCH_RETRIES - 1:
                 wait = (attempt + 1) * 5
-                yield f"⏳ ArXiv HTTP {status}. Retrying in {wait}s…", loading, cost0, None
+                yield _placeholder(f"ArXiv HTTP {status} — retrying in {wait}s…"), None
                 time.sleep(wait)
                 continue
-            yield f"❌ **Fetch failed:** `{type(err).__name__}: {err}`", _placeholder("Fetch failed."), cost0, None
+            yield _placeholder(f"Could not load PDF: {type(err).__name__}: {err}"), None
             return
 
     if pdf_bytes is None:
-        yield f"❌ **Paper `{aid}` not found.**", _placeholder("Paper not found."), cost0, None
+        yield _placeholder(f"Paper {aid} not found."), None
         return
 
-    yield f"✅ Fetched. Rendering pages for `{aid}`…", loading, cost0, None
     with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
         pages_meta = [
             {"page": i, "width": p.rect.width, "height": p.rect.height}
             for i, p in enumerate(pdf)
         ]
     pngs = render_page_pngs(pdf_bytes, aid)
-
     state = {
-        "aid": aid,
-        "pdf_bytes": pdf_bytes,
-        "pages_meta": pages_meta,
-        "pngs": pngs,
+        "aid": aid, "pdf_bytes": pdf_bytes, "pages_meta": pages_meta, "pngs": pngs,
         "title": (meta or {}).get("Title", "Unknown"),
         "authors": (meta or {}).get("Authors", "Unknown"),
-        "summaries": [],
-        "in_tok": 0,
-        "out_tok": 0,
-        "model": model,
+        "summaries": [], "in_tok": 0, "out_tok": 0, "model": model,
     }
-    total = time.monotonic() - t_start
-    yield (
-        f"✅ Loaded `{aid}` in {total:.1f}s · {len(pages_meta)} pages · drag a box to summarise.",
-        render_reader(state),
-        cost0,
-        state,
-    )
+    yield render_reader(state), state
 
 
 def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provider: str):
