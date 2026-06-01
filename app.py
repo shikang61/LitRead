@@ -593,7 +593,27 @@ CSS = """
 #right-rail > * { width: 100%; }
 #provider-slot { width: 100%; }
 #topbar > * { min-width: 0; }
-@media (max-width: 1099px) { #right-rail { display: none; } }
+/* Narrow screens: no room for two fixed rails. Hide the (non-critical) Recent
+   rail and dock the Model/Usage rail into normal flow as a top config bar so
+   the model picker stays usable and can never overlap the content. */
+@media (max-width: 1139px) {
+    #recent-papers { display: none; }
+    #right-rail {
+        position: static;
+        width: auto;
+        max-width: 760px;
+        max-height: none;
+        overflow: visible;
+        margin: 0.5em auto 0 auto;
+        padding: 0 1em;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 0.7em;
+    }
+    #right-rail > * { width: auto; flex: 1 1 240px; min-width: 0; }
+    #provider-slot { width: auto; }
+}
 
 /* ---- Right-rail paper actions (Open PDF / ArXiv Page / Zotero) ---- */
 #paper-actions:empty { display: none; }
@@ -800,17 +820,16 @@ body.lr-rail-collapsed .recent-body { display: none; }
 body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em auto; }
 
 /* Centre the content and reserve room on BOTH sides for the fixed rails (Recent
-   left, Model/Usage right) so neither overlaps the content. */
-@media (min-width: 1100px) {
+   left, Model/Usage right) so neither overlaps. The 560px gutter = two 240px
+   rails + comfortable gaps that survive the vertical scrollbar (100vw includes
+   it, the fixed rails sit inside it). Below 1140px the rails leave the fixed
+   layout (see the right-rail dock rule above), so content uses full width. */
+@media (min-width: 1140px) {
     #center-stack, #status, #output, #reader {
         margin-left: auto !important;
         margin-right: auto !important;
-        max-width: min(1100px, calc(100vw - 540px)) !important;
+        max-width: min(1100px, calc(100vw - 560px)) !important;
     }
-}
-/* Hide the rail on narrow screens (no recents UI); content uses full width. */
-@media (max-width: 1099px) {
-    #recent-papers { display: none; }
 }
 img.recent-push { width: 0; height: 0; }
 
