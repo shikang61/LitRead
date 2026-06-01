@@ -77,6 +77,28 @@ cloudflared tunnel run litread        # (or install as a service: sudo cloudflar
 Note: this is **public** — anyone with the URL can use it (and spend your API tokens).
 Put it behind **Cloudflare Access** (email/SSO gate) if you go this route.
 
+## 4. Install LitRead as a desktop app (icon on your laptop)
+
+LitRead ships a PWA manifest (`static/manifest.webmanifest`, `display: standalone`,
+icons), so once it's served over **HTTPS** (the Tailscale/Cloudflare step above) you
+can install it as a standalone app with its own icon — no download or wrapper needed.
+
+On your laptop, open the HTTPS URL (e.g. `https://<mac-mini>.<tailnet>.ts.net`), then:
+- **Chrome / Edge** — click the **Install** icon in the address bar (or ⋮ menu →
+  "Install LitRead…"). Creates **LitRead.app** in Applications/Launchpad that opens in
+  its own window.
+- **Safari 17+ (macOS Sonoma/Sequoia)** — **File → Add to Dock**. Lands in the
+  Dock/Launchpad as an app.
+
+It launches like a native app (own window + LitRead icon) and can be pinned to the Dock.
+
+Requirements for the Install option to appear / work:
+1. Served over **HTTPS** — Tailscale Serve or the Cloudflare tunnel provides this; a plain
+   `http://<ip>:7860` will NOT offer "Install".
+2. The installed app is a thin client pointing at the mini — it only works while the
+   **mini is on, the service is running, and your laptop is on Tailscale**. Otherwise the
+   window shows a connection error.
+
 ## Updating after a code change
 ```bash
 git pull
