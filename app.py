@@ -9,17 +9,13 @@ Pipeline:
 """
 
 import base64
-import hashlib
 import html
-import json
 import os
 import queue
 import re
 import threading
 import time
 import warnings
-import urllib.error
-import urllib.request
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -28,62 +24,34 @@ load_dotenv(override=False)
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="langchain_community.*")
 warnings.filterwarnings("ignore", message=".*langchain-community.*sunset.*")
 
-# Custom UA — arxiv aggressively rate-limits the default Python-urllib UA.
-_opener = urllib.request.build_opener()
-_opener.addheaders = [
-    ("User-Agent", "ArxivCarousel/1.0 (research summarizer; mailto:user@example.com)"),
-]
-urllib.request.install_opener(_opener)
-
-import arxiv
 import fitz  # pymupdf
 import gradio as gr
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+
+import core
+from core import (
+    CACHE_DIR,
+    MODEL_CONTEXT,
+    PROVIDERS,
+    cache_get,
+    cache_key,
+    cache_put,
+    estimate_cost,
+    extract_arxiv_id,
+    make_llm,
+    parse_json,
+    strip_references,
+)
 
 # -----------------------------------------------------------------------------
-# Config
+# Config (carousel-specific; shared config lives in core.py)
 # -----------------------------------------------------------------------------
-OPENAI_MODEL = "gpt-5.4"
-GROK_MODEL = "grok-4.3"
-GROK_BASE_URL = "https://api.x.ai/v1"
-
 MAX_PAPER_CHARS = 200_000
 MAX_FETCH_RETRIES = 4
 
 # Bump this whenever CAROUSEL_PROMPT changes — invalidates cached carousels.
 PROMPT_VERSION = "v4"
-
-# Cache dir for arxiv_id+prompt_version → carousel JSON. Use /data on HF Spaces
-# with persistent storage; falls back to local ./cache otherwise.
-CACHE_DIR = os.environ.get("LITREAD_CACHE_DIR", "cache")
-
-# Per-1M-token pricing in USD. Update with real numbers when you have them.
-# Cost = (in_tok * input + out_tok * output) / 1_000_000
-PRICING: Dict[str, Dict[str, float]] = {
-    "gpt-5.4":  {"input": 5.00, "output": 15.00},
-    "grok-4.3": {"input": 5.00, "output": 15.00},
-}
-
-# Context-window sizes (input tokens). Used by the cost panel meter.
-MODEL_CONTEXT: Dict[str, int] = {
-    "gpt-5.4":  400_000,
-    "grok-4.3": 256_000,
-}
-
-PROVIDERS = {
-    "Grok": {
-        "model": GROK_MODEL,
-        "base_url": GROK_BASE_URL,
-        "env_key": "XAI_API_KEY",
-    },
-    "OpenAI": {
-        "model": OPENAI_MODEL,
-        "base_url": None,
-        "env_key": "OPENAI_API_KEY",
-    },
-}
 
 # -----------------------------------------------------------------------------
 # System prompt — strict JSON output.
@@ -180,231 +148,18 @@ FORMATTING:
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
-ARXIV_ID_RE = re.compile(
-    r"(?:arxiv\.org/(?:abs|pdf|html)/)?"
-    r"(?P<id>\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)",
-    re.IGNORECASE,
-)
-
-
-def extract_arxiv_id(text: str) -> Optional[str]:
-    if not text:
-        return None
-    text = text.strip().rstrip("/")
-    if text.lower().endswith(".pdf"):
-        text = text[:-4]
-    m = ARXIV_ID_RE.search(text)
-    return m.group("id") if m else None
-
-
-_REFERENCES_HEADER_RE = re.compile(
-    r"(?im)^\s*(references|bibliography|acknowledg(?:e?)ments)\s*$"
-)
-
-
-def strip_references(text: str) -> str:
-    """Cut the references/bibliography tail. Preserves >=40% of doc to avoid
-    chopping a mid-paper section header by accident."""
-    matches = list(_REFERENCES_HEADER_RE.finditer(text))
-    if not matches:
-        return text
-    cut = matches[-1].start()
-    if cut < len(text) * 0.4:
-        return text
-    return text[:cut].rstrip()
-
-
 def load_arxiv_paper(arxiv_id: str) -> List[Document]:
-    # delay_seconds=0.5 (down from arxiv default 3.0) + num_retries=2 keeps the metadata
-    # round-trip under ~2s when arxiv is healthy; backoff still handled by generate_carousel.
-    client = arxiv.Client(page_size=1, delay_seconds=0.5, num_retries=2)
-    results = list(client.results(arxiv.Search(id_list=[arxiv_id])))
-    if not results:
+    """Fetch the paper and return its full text as a single Document. The
+    network fetch + metadata come from core.fetch_pdf; here we add the text body."""
+    pdf_bytes, metadata = core.fetch_pdf(arxiv_id)
+    if pdf_bytes is None:
         return []
-    result = results[0]
-
-    # Hard 30s ceiling — without timeout, urlopen hangs forever when arxiv's CDN stalls.
-    with urllib.request.urlopen(result.pdf_url, timeout=30) as resp:
-        pdf_bytes = resp.read()
     with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
-        page_count = pdf.page_count
         # "text" extraction mode is fastest; skips layout/HTML reconstruction.
         text = "\n\n".join(page.get_text("text") for page in pdf)
     # References list eats ~10-25% of tokens and the LLM can't summarise from it.
     text = strip_references(text)
-
-    names = [a.name for a in result.authors]
-    if not names:
-        authors_display = "Unknown"
-    elif len(names) == 1:
-        authors_display = names[0]
-    else:
-        authors_display = f"{names[0]} et al."
-
-    metadata = {
-        "Title": result.title or "Unknown",
-        "Authors": authors_display,
-        "AuthorsAll": [a.name for a in result.authors],
-        "Published": result.published.date().isoformat() if result.published else "",
-        "Year": result.published.year if result.published else 0,
-        "Pages": page_count,
-        "entry_id": result.entry_id,
-        "AbsURL": result.entry_id,
-        "PdfURL": result.pdf_url,
-        "Summary": (result.summary or "").strip(),
-    }
     return [Document(page_content=text, metadata=metadata)]
-
-
-def make_llm(provider: str, api_key: str, streaming: bool = True) -> ChatOpenAI:
-    cfg = PROVIDERS[provider]
-    kwargs: Dict[str, Any] = {
-        "model": cfg["model"],
-        "api_key": api_key,
-        "streaming": streaming,
-        "stream_usage": True,        # langchain-openai >=0.2: usage on final chunk
-        "temperature": 0.3,          # tighter sampling → more reliable JSON
-    }
-    # Request strict JSON output when supported (OpenAI; Grok ignores or errors).
-    if cfg["base_url"] is None:
-        kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
-    if cfg["base_url"]:
-        kwargs["base_url"] = cfg["base_url"]
-
-    try:
-        return ChatOpenAI(**kwargs)
-    except TypeError:
-        # Older langchain-openai doesn't accept stream_usage; retry without.
-        kwargs.pop("stream_usage", None)
-        return ChatOpenAI(**kwargs)
-
-
-def estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
-    p = PRICING.get(model)
-    if not p:
-        return 0.0
-    return (in_tok * p["input"] + out_tok * p["output"]) / 1_000_000
-
-
-# ---- Carousel cache (arxiv_id + provider + model + prompt_version -> JSON) ----
-def cache_key(arxiv_id: str, provider: str, model: str) -> str:
-    raw = f"{arxiv_id}|{provider}|{model}|{PROMPT_VERSION}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-
-
-def cache_get(key: str) -> Optional[Dict[str, Any]]:
-    path = os.path.join(CACHE_DIR, f"{key}.json")
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def cache_put(key: str, payload: Dict[str, Any]) -> None:
-    try:
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        path = os.path.join(CACHE_DIR, f"{key}.json")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-    except Exception:
-        pass  # cache is best-effort; a write failure must never break the run
-
-
-# ---- JSON parser tolerant of code fences, surrounding prose, bad escapes ---
-# Valid JSON string escapes are \\ \" \/ \b \f \n \r \t \uXXXX. Anything else
-# (e.g. \( \$ \% from LaTeX) is illegal. LLMs sometimes emit those — strip the
-# stray backslash before retrying.
-_INVALID_ESC_RE = re.compile(r'\\([^\\"/bfnrtu])')
-
-
-def _normalise_quotes(t: str) -> str:
-    """Replace smart/curly quotes the LLM occasionally emits with ASCII."""
-    return (
-        t.replace("“", '"').replace("”", '"')
-         .replace("‘", "'").replace("’", "'")
-    )
-
-
-def _repair_truncated(t: str) -> str:
-    """Close unterminated strings/objects/arrays so json.loads parses the prefix.
-
-    Walks the buffer, tracks bracket depth + in-string state, then appends the
-    missing closers. Lets us render partial carousels during streaming and
-    salvage truncated final outputs.
-    """
-    s = t.rstrip()
-    in_string = False
-    escape = False
-    stack: List[str] = []
-    for ch in s:
-        if escape:
-            escape = False
-            continue
-        if ch == "\\":
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            stack.append("}")
-        elif ch == "[":
-            stack.append("]")
-        elif ch in "]}" and stack and stack[-1] == ch:
-            stack.pop()
-    suffix = ""
-    if in_string:
-        suffix += '"'
-    end = s
-    while end.endswith(","):
-        end = end[:-1]
-    return end + suffix + "".join(reversed(stack))
-
-
-def parse_carousel_json(text: str) -> Dict[str, Any]:
-    """Tolerant JSON parser. Tries several common LLM-mistake fixes before giving up."""
-    s = _normalise_quotes(text.strip())
-    fenced = re.match(r"^```(?:json)?\s*\n(.*?)\n```\s*$", s, re.DOTALL)
-    if fenced:
-        s = fenced.group(1)
-    first = s.find("{")
-    last = s.rfind("}")
-    if first != -1 and last > first:
-        s = s[first : last + 1]
-    elif first != -1:
-        # No closing brace yet (streaming mid-output) — keep from first { onward.
-        s = s[first:]
-
-    def _fix_escapes(t: str) -> str:
-        # Double up invalid backslash escapes (\(, \$, \%, ...) so JSON parses
-        # AND the backslash survives in the value (needed for LaTeX).
-        return _INVALID_ESC_RE.sub(r"\\\\\1", t)
-
-    def _strip_trailing_commas(t: str) -> str:
-        return re.sub(r",(\s*[\]}])", r"\1", t)
-
-    candidates = [
-        s,
-        _fix_escapes(s),
-        _strip_trailing_commas(s),
-        _strip_trailing_commas(_fix_escapes(s)),
-        _repair_truncated(s),
-        _repair_truncated(_strip_trailing_commas(_fix_escapes(s))),
-    ]
-    last_err: Optional[Exception] = None
-    for cand in candidates:
-        try:
-            return json.loads(cand, strict=False)
-        except json.JSONDecodeError as e:
-            last_err = e
-    raise last_err if last_err else json.JSONDecodeError("no candidate", s, 0)
-
-
 
 
 # ---- HTML renderers --------------------------------------------------------
@@ -602,7 +357,7 @@ def generate_carousel(url: str, provider: str):
         return
 
     # ---- Cache hit short-circuits both arxiv fetch AND the LLM call. -------
-    ckey = cache_key(aid, provider, model_name)
+    ckey = cache_key(aid, provider, model_name, PROMPT_VERSION)
     cached = cache_get(ckey)
     if cached:
         meta_c = cached.get("meta", {})
@@ -817,7 +572,7 @@ def generate_carousel(url: str, provider: str):
 
     # ---- Parse JSON, render cards ------------------------------------------
     try:
-        data = parse_carousel_json(buffer)
+        data = parse_json(buffer)
     except Exception as e:
         elapsed = time.monotonic() - t_gen
         yield (
