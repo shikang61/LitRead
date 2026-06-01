@@ -686,8 +686,8 @@ CSS = """
 }
 #tagline { color: #555; margin-bottom: 1.4em; font-size: 1.5em; text-align: center; font-weight: 500; }
 #url-box textarea {
-    font-size: 1.15em !important;
-    padding: 14px 18px !important;
+    font-size: 14px !important;
+    padding: 12px 18px !important;
     border-radius: 28px !important;
 }
 #url-box { width: 100%; }
