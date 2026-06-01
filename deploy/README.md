@@ -9,8 +9,7 @@ domain.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh       # install uv (skip if present)
-brew install git-lfs && git lfs install               # one-time: PWA icons are LFS-stored
-git clone <your-repo> LitRead && cd LitRead          # LFS smudges the icons on clone
+git clone <your-repo> LitRead && cd LitRead
 uv venv                                               # creates .venv
 uv pip install -r requirements.txt
 cp .env.example .env                                  # then edit .env:
