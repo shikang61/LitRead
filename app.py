@@ -593,6 +593,19 @@ CSS = """
 /* gr.HTML areas inherit the theme's larger font-size; force the small base so
    the carousel cards + reader scale down (their em sizing then follows). */
 #output, #reader { font-size: 11px !important; }
+/* The theme sizes the .prose wrapper inside gr.HTML, so em-based sizes balloon off
+   ~16px. Pin the visible text in explicit px (id-scoped !important wins). */
+#tagline { font-size: 16px !important; }
+#output .paper-title { font-size: 17px !important; }
+#output .hook { font-size: 15px !important; line-height: 1.4 !important; }
+#output .card-emoji { font-size: 26px !important; }
+#output .card h3 { font-size: 15px !important; }
+#output .card p { font-size: 12.5px !important; }
+#output .card-bullets, #output .card-bullets li { font-size: 12px !important; }
+#output .paper-meta p, #output .trunc-banner { font-size: 12px !important; }
+#reader .lr-title { font-size: 16px !important; }
+#reader .lr-authors, #reader .lr-hint { font-size: 12px !important; }
+#reader .lr-bullets, #reader .lr-bullets li { font-size: 12px !important; }
 
 /* Force a clean, highly-legible font across the whole app, including injected HTML. */
 .gradio-container,
@@ -1075,16 +1088,20 @@ img.recent-push { width: 0; height: 0; }
     border-radius: 8px; padding: 0.5em 0.8em; margin: 0 0 1.2em 0;
 }
 /* Summary cards stack in order beside the page. */
-.lr-notes { flex: 1 1 42%; min-width: 0; display: flex; flex-direction: column; gap: 0.5em; }
+/* Cards are absolutely positioned at their box's vertical level (refined by
+   lrLayoutNotes to avoid overlaps). */
+.lr-notes { flex: 1 1 42%; min-width: 0; position: relative; }
 .lr-note {
+    position: absolute;
+    left: 0; right: 0;
     box-sizing: border-box;
     display: flex; gap: 0.6em; align-items: flex-start;
     padding: 0.6em 0.8em;
     border: 1px solid #e5e7eb; border-radius: 10px;
     background: #fff; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    transition: background 0.15s, border-color 0.15s, top 0.15s ease;
 }
-.lr-note:hover { background: #eef2ff; border-color: #6366f1; transform: translateX(2px); }
+.lr-note:hover { background: #eef2ff; border-color: #6366f1; }
 .lr-note-num {
     flex: 0 0 auto;
     width: 22px; height: 22px;
@@ -1300,6 +1317,28 @@ window.lrDelete = function(n) {
   if (btn) btn.click();
 };
 
+// Anchor each summary card to its box's vertical position; push overlaps down.
+window.lrLayoutNotes = function() {
+  document.querySelectorAll('#reader .lr-row').forEach(function(row) {
+    var img = row.querySelector('.lr-page-img');
+    var col = row.querySelector('.lr-notes');
+    if (!img || !col) return;
+    var h = img.clientHeight;
+    if (!h) return;                       // image not laid out yet; retry on load
+    var notes = Array.prototype.slice.call(col.querySelectorAll('.lr-note'));
+    if (!notes.length) { col.style.minHeight = h + 'px'; return; }
+    notes.forEach(function(n) { n.__want = (parseFloat(n.dataset.top) || 0) / 100 * h; });
+    notes.sort(function(a, b) { return a.__want - b.__want; });
+    var gap = 8, prevBottom = 0;
+    notes.forEach(function(n) {
+      var top = Math.max(n.__want, prevBottom);
+      n.style.top = top + 'px';
+      prevBottom = top + n.offsetHeight + gap;
+    });
+    col.style.minHeight = Math.max(h, prevBottom) + 'px';
+  });
+};
+
 // ---- Interactive reader: drag to summarise; Shift+drag to add regions -------
 // Plain drag -> one-region summary. Shift+drag -> add a pending region (amber
 // dashed box); the toolbar's "Summarise" combines all pending regions into one
@@ -1435,6 +1474,10 @@ window.lrDelete = function(n) {
       pending = pending.filter(function(p) { return p.el && document.contains(p.el); });
       toolbar();
       r.querySelectorAll('.lr-drawlayer').forEach(attach);
+      r.querySelectorAll('.lr-page-img').forEach(function(img) {
+        if (!img.__lrLayHook) { img.__lrLayHook = true; img.addEventListener('load', window.lrLayoutNotes); }
+      });
+      if (window.lrLayoutNotes) window.lrLayoutNotes();
     }
     new MutationObserver(function() {
       if (t) clearTimeout(t);
@@ -1443,6 +1486,11 @@ window.lrDelete = function(n) {
     scan();
   }
   hook();
+  var rzt = null;
+  window.addEventListener('resize', function() {
+    if (rzt) clearTimeout(rzt);
+    rzt = setTimeout(function() { if (window.lrLayoutNotes) window.lrLayoutNotes(); }, 150);
+  });
 })();
 </script>
 """
