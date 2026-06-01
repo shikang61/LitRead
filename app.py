@@ -600,7 +600,7 @@ CSS = """
     width: 100% !important;
     margin: 0 auto !important;
     padding: 1em 2em !important;
-    font-size: 14px !important;   /* base text size; em-based content scales with it */
+    font-size: 13px !important;   /* base text size; em-based content scales with it */
 }
 
 /* Force a clean, highly-legible font across the whole app, including injected HTML. */
