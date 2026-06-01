@@ -26,25 +26,27 @@ from core import PROVIDERS
 
 PAGE_ZOOM = 2.0                 # rasterise pages at 2x for a crisp base image
 MAX_FETCH_RETRIES = 4
-SUMMARY_CACHE_VERSION = "v2"     # bump to invalidate cached region summaries
+SUMMARY_CACHE_VERSION = "v3"     # bump to invalidate cached region summaries
 MIN_SELECTION_FRAC = 0.01       # ignore drags smaller than 1% of the page
 MAX_REGION_CHARS = 8000         # safety cap on text sent to the LLM per selection
 PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
 
 
-REGION_PROMPT = """You are a clear, plain-spoken science communicator.
+REGION_PROMPT = """You are an expert who explains hard research in the SIMPLEST possible words.
+Imagine teaching a curious 10-year-old: short sentences, everyday words, concrete examples —
+simple but accurate, never academic.
 
 The user selected a region of a research paper; you are given the text from that region.
-Explain it in plain, layman's terms in this EXACT shape:
-- FIRST line: a punchy one-line title (<=12 words) capturing the whole selection. No "- "
-  prefix, no markdown heading — just the sentence.
-- THEN 2 to 4 bullet lines, each starting with "- ", one idea per bullet, no jargon
-  (define any unavoidable term in a few words).
+Explain it in this EXACT shape:
+- FIRST line: a clear, COMPLETE one-sentence summary of the selection in plain words. Keep
+  every word the sentence needs to make sense — do not clip it into a vague fragment. No "- "
+  prefix, no markdown heading.
+- THEN 2 to 4 bullet lines, each starting with "- ", one simple idea per bullet.
 
-**Bold the key terms generously** in BOTH the title and the bullets using double asterisks
-(e.g. **contrastive learning**, **48% accuracy**) so the important words pop for quick
-scanning — aim for 1-3 bold terms per line. If it is an equation, say in words what it
-computes or represents. Stay grounded in the given text; do not invent results.
+In each bullet, wrap the ONE most important phrase in **double asterisks** to highlight it.
+Highlight the key idea or result, NOT names (e.g. LongDS, Gemini-3.1-Pro) unless the name is
+the point. If it is an equation, say in words what it does. Stay grounded in the given text;
+do not invent results.
 
 Output ONLY the title line followed by the bullet lines, nothing else."""
 
