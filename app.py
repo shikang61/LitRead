@@ -1000,8 +1000,8 @@ img.recent-push { width: 0; height: 0; }
     border: 1px solid #e5e7eb; border-radius: 8px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
-/* Hidden bridge components the drag JS drives. */
-#lr-selection, #lr-summarize { display: none !important; }
+/* Hidden bridge components the drag/delete JS drives. */
+#lr-selection, #lr-summarize, #lr-delete, #lr-delete-btn { display: none !important; }
 /* Transparent layer over each page that captures the rubber-band drag. */
 .lr-drawlayer { position: absolute; inset: 0; cursor: crosshair; z-index: 2; }
 .lr-rubber {
@@ -1062,7 +1062,14 @@ img.recent-push { width: 0; height: 0; }
     display: flex; align-items: center; justify-content: center;
     margin-top: 0.1em;
 }
-.lr-note-body { display: flex; flex-direction: column; gap: 0.25em; }
+.lr-note-body { display: flex; flex-direction: column; gap: 0.25em; flex: 1 1 auto; min-width: 0; }
+.lr-del {
+    flex: 0 0 auto; align-self: flex-start;
+    border: none; background: none; cursor: pointer;
+    color: #9ca3af; font-size: 0.95em; line-height: 1;
+    padding: 0.1em 0.3em; border-radius: 6px;
+}
+.lr-del:hover { color: #ef4444; background: #fef2f2; }
 .lr-bullets { margin: 0; padding-left: 0; list-style: none; color: #374151; }
 .lr-bullets li { position: relative; padding-left: 0.85em; margin: 0.18em 0; line-height: 1.4; font-size: 0.95em; }
 .lr-bullets li::before { content: "•"; color: #6366f1; position: absolute; left: 0; top: 0; }
@@ -1250,6 +1257,18 @@ window.lrFlash = function(id) {
   setTimeout(function() { el.classList.remove('lr-flash'); }, 1500);
 };
 
+// Remove a summary by number: set the hidden #lr-delete textbox + click its button.
+window.lrDelete = function(n) {
+  var box = document.getElementById('lr-delete');
+  var ta = box ? (box.matches('textarea,input') ? box : box.querySelector('textarea, input')) : null;
+  if (!ta) return;
+  ta.value = String(n);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  var btn = document.getElementById('lr-delete-btn');
+  if (btn && btn.tagName !== 'BUTTON') btn = btn.querySelector('button') || btn;
+  if (btn) btn.click();
+};
+
 // ---- Interactive reader: drag a box on a page -> summarise that region ----
 // On mouseup the drag rect (page-relative 0-1 fractions) + page index are written
 // to the hidden #lr-selection textbox and the hidden #lr-summarize button is
@@ -1394,6 +1413,8 @@ def build_ui() -> gr.Blocks:
         paper_state = gr.State(None)
         selection = gr.Textbox(elem_id="lr-selection", show_label=False, container=False)
         summarize_btn = gr.Button("summarize", elem_id="lr-summarize")
+        delete_box = gr.Textbox(elem_id="lr-delete", show_label=False, container=False)
+        delete_btn = gr.Button("delete", elem_id="lr-delete-btn")
 
         # Update cost panel live when provider changes.
         def _on_provider_change(p):
@@ -1418,6 +1439,12 @@ def build_ui() -> gr.Blocks:
         summarize_btn.click(
             annotate.summarize_region,
             inputs=[paper_state, selection, provider],
+            outputs=[reader, cost, paper_state],
+        )
+        # ✕ on a summary card removes that annotation.
+        delete_btn.click(
+            annotate.delete_summary,
+            inputs=[paper_state, delete_box, provider],
             outputs=[reader, cost, paper_state],
         )
 
