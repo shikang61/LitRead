@@ -14,6 +14,7 @@ Pipeline:
 import html
 import json
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -32,12 +33,13 @@ PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
 
 REGION_PROMPT = """You are a clear, plain-spoken science communicator.
 
-The user selected a region of a research paper. You are given the text from that region.
-Explain what it is saying in plain, layman's terms — 2 to 4 short sentences, no jargon
-(define any unavoidable term in a few words). If it is an equation, say in words what it
-computes or represents. Stay grounded in the given text; do not invent results.
+The user selected a region of a research paper; you are given the text from that region.
+Explain what it says in plain, layman's terms as 2 to 4 short bullet points. Put each
+bullet on its own line starting with "- ", one idea per bullet, no jargon (define any
+unavoidable term in a few words). If it is an equation, say in words what it computes or
+represents. Stay grounded in the given text; do not invent results.
 
-Output ONLY the explanation, as plain text (no markdown headers, no preamble)."""
+Output ONLY the bullet lines (each starting with "- "), nothing else."""
 
 
 # -----------------------------------------------------------------------------
@@ -139,6 +141,18 @@ def _placeholder(msg: str = "Load a paper, then drag a box over any region to su
     return f'<div class="lr-empty">{html.escape(msg)}</div>'
 
 
+def _bullets_html(summary: str) -> str:
+    """Render the summary (LLM returns '- ' bullet lines) as a <ul>. Falls back to a
+    single bullet for one-line messages (e.g. warnings)."""
+    lines = [re.sub(r"^\s*[-*•·]\s*", "", ln).strip() for ln in (summary or "").splitlines()]
+    items = [ln for ln in lines if ln]
+    if not items:
+        t = (summary or "").strip()
+        items = [t] if t else []
+    lis = "".join(f"<li>{html.escape(it)}</li>" for it in items)
+    return f'<ul class="lr-bullets">{lis}</ul>'
+
+
 def render_reader(state: Optional[Dict[str, Any]]) -> str:
     """Page images (with a drag layer + selection markers) beside a panel of summaries."""
     if not state or not state.get("pages_meta"):
@@ -178,9 +192,7 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
                 f'<div class="lr-note" id="lr-note-{s["n"]}" data-target="lr-box-{s["n"]}" '
                 f'onclick="lrFlash(\'lr-box-{s["n"]}\')">'
                 f'<span class="lr-note-num">{s["n"]}</span>'
-                f'<span class="lr-note-body">'
-                f'<span class="lr-note-text">{html.escape(s["summary"])}</span>'
-                f'</span></div>'
+                f'<span class="lr-note-body">{_bullets_html(s["summary"])}</span></div>'
             )
         cards_html = "".join(cards) or '<div class="lr-note-empty">No selections on this page yet.</div>'
 

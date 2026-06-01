@@ -1078,6 +1078,8 @@ img.recent-push { width: 0; height: 0; }
     margin-top: 0.1em;
 }
 .lr-note-body { display: flex; flex-direction: column; gap: 0.25em; }
+.lr-bullets { margin: 0; padding-left: 1.1em; color: #374151; }
+.lr-bullets li { margin: 0.18em 0; line-height: 1.4; font-size: 0.95em; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
