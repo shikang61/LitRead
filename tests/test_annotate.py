@@ -9,6 +9,7 @@ import fitz
 import pytest
 
 import annotate
+import core
 
 
 def _make_pdf() -> bytes:
@@ -72,6 +73,15 @@ def test_append_summary_numbers_and_accumulates_tokens():
 
 
 # ---- render_reader ----------------------------------------------------------
+def test_summary_cache_roundtrip(monkeypatch, tmp_path):
+    monkeypatch.setattr(core, "CACHE_DIR", str(tmp_path))
+    state = {"aid": "1234.5678", "model": "grok-4.3",
+             "summaries": [{"n": 1, "page": 0, "rect": [0, 0, 1, 1], "text": "t", "summary": "s"}]}
+    annotate._persist_summaries(state, "Grok")
+    got = core.cache_get(annotate._summary_cache_key("1234.5678", "Grok", "grok-4.3"))
+    assert got["summaries"] == state["summaries"]
+
+
 def test_render_reader_no_state_placeholder():
     assert "lr-empty" in annotate.render_reader(None)
 

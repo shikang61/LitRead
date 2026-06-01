@@ -26,6 +26,7 @@ from core import PROVIDERS
 
 PAGE_ZOOM = 2.0                 # rasterise pages at 2x for a crisp base image
 MAX_FETCH_RETRIES = 4
+SUMMARY_CACHE_VERSION = "v1"     # bump to invalidate cached region summaries
 MIN_SELECTION_FRAC = 0.01       # ignore drags smaller than 1% of the page
 MAX_REGION_CHARS = 8000         # safety cap on text sent to the LLM per selection
 PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
@@ -108,6 +109,21 @@ def parse_selection(selection_json: str, n_pages: int) -> Optional[Dict[str, Any
     if (x1 - x0) < MIN_SELECTION_FRAC or (y1 - y0) < MIN_SELECTION_FRAC:
         return None
     return {"page": page, "rect": [x0, y0, x1, y1]}
+
+
+def _summary_cache_key(aid: str, provider: str, model: str) -> str:
+    return core.cache_key(aid, provider, model, "summaries-" + SUMMARY_CACHE_VERSION)
+
+
+def _persist_summaries(state: Dict[str, Any], provider: str) -> None:
+    """Best-effort save of a paper's region summaries so they survive reloads."""
+    try:
+        core.cache_put(
+            _summary_cache_key(state["aid"], provider, state["model"]),
+            {"summaries": state["summaries"]},
+        )
+    except Exception:
+        pass
 
 
 def append_summary(
@@ -274,6 +290,10 @@ def load_reader(url: str, provider: str, force: bool = False):
         "authors": (meta or {}).get("Authors", "Unknown"),
         "summaries": [], "in_tok": 0, "out_tok": 0, "model": model,
     }
+    # Restore previously cached summaries for this paper (drag-summaries persist).
+    cached = core.cache_get(_summary_cache_key(aid, provider, model))
+    if cached and isinstance(cached.get("summaries"), list):
+        state["summaries"] = cached["summaries"]
     yield render_reader(state), state
 
 
@@ -292,16 +312,22 @@ def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provi
 
     text = extract_region_text(state["pdf_bytes"], sel["page"], sel["rect"])
     if not text:
-        return _out(append_summary(state, sel, "", "No selectable text in that region.", 0, 0))
+        new = append_summary(state, sel, "", "No selectable text in that region.", 0, 0)
+        _persist_summaries(new, provider)
+        return _out(new)
 
     env_key = PROVIDERS[provider]["env_key"]
     api_key = os.getenv(env_key, "").strip()
     if not api_key:
+        # Don't cache a transient "set your key" message.
         return _out(append_summary(state, sel, text, f"⚠️ Set {env_key} in .env to summarise.", 0, 0))
 
     try:
         summary, in_tok, out_tok = _summarize_text(text, provider, api_key)
     except Exception as e:
+        # Don't cache a transient error.
         return _out(append_summary(state, sel, text, f"⚠️ Summary failed: {type(e).__name__}: {e}", 0, 0))
 
-    return _out(append_summary(state, sel, text, summary, in_tok, out_tok))
+    new = append_summary(state, sel, text, summary, in_tok, out_tok)
+    _persist_summaries(new, provider)
+    return _out(new)
