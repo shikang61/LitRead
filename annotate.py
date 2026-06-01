@@ -210,7 +210,10 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
                 f'<div class="lr-note" id="lr-note-{s["n"]}" data-target="lr-box-{s["n"]}" '
                 f'onclick="lrFlash(\'lr-box-{s["n"]}\')">'
                 f'<span class="lr-note-num">{s["n"]}</span>'
-                f'<span class="lr-note-body">{_bullets_html(s["summary"])}</span></div>'
+                f'<span class="lr-note-body">{_bullets_html(s["summary"])}</span>'
+                f'<button class="lr-del" title="Remove this annotation" '
+                f'onclick="event.stopPropagation(); window.lrDelete({s["n"]})">✕</button>'
+                f'</div>'
             )
         cards_html = "".join(cards) or '<div class="lr-note-empty">No selections on this page yet.</div>'
 
@@ -297,6 +300,33 @@ def load_reader(url: str, provider: str, force: bool = False):
     yield render_reader(state), state
 
 
+def _render_out(state: Optional[Dict[str, Any]], provider: str):
+    """(reader_html, cost_html, state) for the current state."""
+    model = PROVIDERS[provider]["model"]
+    if not state:
+        return _placeholder(), core.render_cost_html(model), state
+    return (render_reader(state),
+            core.render_cost_html(model, state.get("in_tok", 0), state.get("out_tok", 0)),
+            state)
+
+
+def delete_summary(state: Optional[Dict[str, Any]], n_json: str, provider: str):
+    """Remove the summary numbered n_json, renumber the rest, re-render + re-cache."""
+    if not state or not state.get("summaries"):
+        return _render_out(state, provider)
+    try:
+        n = int(str(n_json).strip())
+    except (TypeError, ValueError):
+        return _render_out(state, provider)
+    sums = [dict(s) for s in state["summaries"] if s["n"] != n]
+    for i, s in enumerate(sums, 1):
+        s["n"] = i
+    new = dict(state)
+    new["summaries"] = sums
+    _persist_summaries(new, provider)
+    return _render_out(new, provider)
+
+
 def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provider: str):
     """Summarise the text under a drawn box. Returns (reader_html, cost_html, state)."""
     model = PROVIDERS[provider]["model"]
@@ -304,7 +334,7 @@ def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provi
         return _placeholder(), core.render_cost_html(model), state
 
     def _out(st):
-        return render_reader(st), core.render_cost_html(model, st.get("in_tok", 0), st.get("out_tok", 0)), st
+        return _render_out(st, provider)
 
     sel = parse_selection(selection_json, len(state["pages_meta"]))
     if sel is None:
