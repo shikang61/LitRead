@@ -170,6 +170,21 @@ def make_llm(provider: str, api_key: str, streaming: bool = True) -> ChatOpenAI:
         return ChatOpenAI(**kwargs)
 
 
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def escape_with_bold(text: str) -> str:
+    """HTML-escape, then convert `**term**` → `<strong>term</strong>`."""
+    parts: List[str] = []
+    last = 0
+    for m in _BOLD_RE.finditer(text):
+        parts.append(html.escape(text[last:m.start()]))
+        parts.append(f'<strong>{html.escape(m.group(1))}</strong>')
+        last = m.end()
+    parts.append(html.escape(text[last:]))
+    return "".join(parts)
+
+
 def estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
     p = PRICING.get(model)
     if not p:
