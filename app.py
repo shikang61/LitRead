@@ -590,6 +590,9 @@ CSS = """
     padding: 1em 2em !important;
     font-size: 11px !important;   /* base text size; em-based content scales with it */
 }
+/* gr.HTML areas inherit the theme's larger font-size; force the small base so
+   the carousel cards + reader scale down (their em sizing then follows). */
+#output, #reader { font-size: 11px !important; }
 
 /* Force a clean, highly-legible font across the whole app, including injected HTML. */
 .gradio-container,
