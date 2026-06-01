@@ -1028,7 +1028,7 @@ img.recent-push { width: 0; height: 0; }
 .lr-row {
     display: flex;
     gap: 18px;
-    align-items: flex-start;
+    align-items: stretch;   /* notes column matches the page image height */
     margin-bottom: 2.2em;
 }
 .lr-pagewrap { flex: 1 1 58%; min-width: 0; }
@@ -1078,15 +1078,20 @@ img.recent-push { width: 0; height: 0; }
     box-shadow: 0 0 0 4px rgba(99,102,241,0.45);
     background: rgba(99,102,241,0.18);
 }
-.lr-notes { flex: 1 1 42%; min-width: 0; display: flex; flex-direction: column; gap: 0.5em; }
+/* Notes are absolutely positioned at their box's vertical level (set inline +
+   refined by lrLayoutNotes to avoid overlaps). */
+.lr-notes { flex: 1 1 42%; min-width: 0; position: relative; }
 .lr-note {
+    position: absolute;
+    left: 0; right: 0;
+    box-sizing: border-box;
     display: flex; gap: 0.6em; align-items: flex-start;
     padding: 0.6em 0.8em;
     border: 1px solid #e5e7eb; border-radius: 10px;
     background: #fff; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    transition: background 0.15s, border-color 0.15s, top 0.15s ease;
 }
-.lr-note:hover { background: #eef2ff; border-color: #6366f1; transform: translateX(2px); }
+.lr-note:hover { background: #eef2ff; border-color: #6366f1; }
 .lr-note-num {
     flex: 0 0 auto;
     width: 22px; height: 22px;
@@ -1223,6 +1228,8 @@ window.LITREAD_RECENT = {
     var next = !this.isCollapsed();
     try { localStorage.setItem(this.CKEY, next ? '1' : '0'); } catch (e) {}
     this.applyCollapsed();
+    // Content width changes with the gutter; re-align notes after the transition.
+    if (window.lrLayoutNotes) setTimeout(window.lrLayoutNotes, 260);
   },
   load: function(aid) {
     var ta = document.querySelector('#url-box textarea');
@@ -1287,6 +1294,52 @@ window.lrFlash = function(id) {
   el.classList.add('lr-flash');
   setTimeout(function() { el.classList.remove('lr-flash'); }, 1500);
 };
+
+// ---- Annotated reader: align each note to its box's vertical position ----
+// Desired top = the box's top % of the page image; a greedy pass then pushes
+// any overlapping notes downward so they stay readable near their anchors.
+window.lrLayoutNotes = function() {
+  document.querySelectorAll('#reader .lr-row').forEach(function(row) {
+    var img = row.querySelector('.lr-page-img');
+    var col = row.querySelector('.lr-notes');
+    if (!img || !col) return;
+    var h = img.clientHeight;
+    if (!h) return;                       // image not laid out yet; retry on load
+    var notes = Array.prototype.slice.call(col.querySelectorAll('.lr-note'));
+    if (!notes.length) return;
+    notes.forEach(function(n) { n.__want = (parseFloat(n.dataset.top) || 0) / 100 * h; });
+    notes.sort(function(a, b) { return a.__want - b.__want; });
+    var gap = 8, prevBottom = 0;
+    notes.forEach(function(n) {
+      var top = Math.max(n.__want, prevBottom);
+      n.style.top = top + 'px';
+      prevBottom = top + n.offsetHeight + gap;
+    });
+    col.style.minHeight = Math.max(h, prevBottom) + 'px';
+  });
+};
+(function() {
+  function hook() {
+    var r = document.getElementById('reader');
+    if (!r) { setTimeout(hook, 300); return; }
+    var pending = null;
+    new MutationObserver(function() {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(function() {
+        r.querySelectorAll('.lr-page-img').forEach(function(img) {
+          if (!img.__lrHooked) { img.__lrHooked = true; img.addEventListener('load', window.lrLayoutNotes); }
+        });
+        window.lrLayoutNotes();
+      }, 120);
+    }).observe(r, { childList: true, subtree: true });
+  }
+  hook();
+  var rt = null;
+  window.addEventListener('resize', function() {
+    if (rt) clearTimeout(rt);
+    rt = setTimeout(function() { if (window.lrLayoutNotes) window.lrLayoutNotes(); }, 150);
+  });
+})();
 </script>
 """
 

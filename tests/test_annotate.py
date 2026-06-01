@@ -161,6 +161,9 @@ def test_render_reader_html_contains_image_box_and_note():
     assert "the &lt;core&gt; idea" in out  # note text HTML-escaped
     assert "lr-hl" in out               # keyword highlight element
     assert "equation" in out            # kind tag shown
+    # note is anchored to its box's vertical position (top = box top)
+    assert 'data-top="12.5"' in out
+    assert "top:12.5%" in out
 
 
 def test_render_reader_html_empty_message():
