@@ -595,17 +595,17 @@ CSS = """
 #output, #reader { font-size: 11px !important; }
 /* The theme sizes the .prose wrapper inside gr.HTML, so em-based sizes balloon off
    ~16px. Pin the visible text in explicit px (id-scoped !important wins). */
-#tagline { font-size: 16px !important; }
-#output .paper-title { font-size: 17px !important; }
-#output .hook { font-size: 15px !important; line-height: 1.4 !important; }
-#output .card-emoji { font-size: 26px !important; }
-#output .card h3 { font-size: 15px !important; }
-#output .card p { font-size: 12.5px !important; }
-#output .card-bullets, #output .card-bullets li { font-size: 12px !important; }
-#output .paper-meta p, #output .trunc-banner { font-size: 12px !important; }
-#reader .lr-title { font-size: 16px !important; }
-#reader .lr-authors, #reader .lr-hint { font-size: 12px !important; }
-#reader .lr-bullets, #reader .lr-bullets li { font-size: 12px !important; }
+#tagline { font-size: 17px !important; }
+#output .paper-title { font-size: 19px !important; }
+#output .hook { font-size: 17px !important; line-height: 1.4 !important; }
+#output .card-emoji { font-size: 30px !important; }
+#output .card h3 { font-size: 17px !important; }
+#output .card p { font-size: 14.5px !important; }
+#output .card-bullets, #output .card-bullets li { font-size: 14px !important; }
+#output .paper-meta p, #output .trunc-banner { font-size: 13.5px !important; }
+#reader .lr-title { font-size: 18px !important; }
+#reader .lr-authors, #reader .lr-hint { font-size: 13px !important; }
+#reader .lr-bullets, #reader .lr-bullets li { font-size: 14px !important; }
 
 /* Force a clean, highly-legible font across the whole app, including injected HTML. */
 .gradio-container,
@@ -692,6 +692,7 @@ CSS = """
 }
 #url-box { width: 100%; }
 #generate-row { justify-content: center; margin-top: 1em; gap: 0.6em; }
+#generate-row button { font-size: 13px !important; }
 #force-row { justify-content: center; margin-top: 0.5em; }
 #force-toggle { color: #6b7280; font-size: 0.9em; }
 
