@@ -12,8 +12,8 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 if [ ! -x "$PY" ]; then
   echo "No venv python at $PY"
-  echo "Create it first:"
-  echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  echo "Create it first (uv):"
+  echo "  uv venv && uv pip install -r requirements.txt"
   exit 1
 fi
 if [ ! -f "$REPO/.env" ]; then
@@ -55,6 +55,7 @@ echo "Installed $LABEL"
 echo "  Local:  http://localhost:$PORT"
 echo "  Logs:   $REPO/deploy/logs/litread.log"
 echo "Manage:"
+echo "  Update:  bash deploy/update-macmini.sh   (pull + uv sync + restart)"
 echo "  Restart: launchctl kickstart -k gui/$(id -u)/$LABEL"
 echo "  Stop:    launchctl bootout gui/$(id -u)/$LABEL"
 echo "Next: expose it — bash deploy/expose-tailscale.sh   (or expose-cloudflare.sh)"

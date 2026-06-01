@@ -8,9 +8,10 @@ domain.
 ## 1. One-time prep on the Mac mini
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh       # install uv (skip if present)
 git clone <your-repo> LitRead && cd LitRead          # or pull your existing copy
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+uv venv                                               # creates .venv
+uv pip install -r requirements.txt
 cp .env.example .env                                  # then edit .env:
 #   OPENAI_API_KEY=...        (and/or)
 #   XAI_API_KEY=...
@@ -100,11 +101,19 @@ Requirements for the Install option to appear / work:
    window shows a connection error.
 
 ## Updating after a code change
+One command (pull + uv sync + restart):
+```bash
+bash deploy/update-macmini.sh
+```
+Or manually:
 ```bash
 git pull
-.venv/bin/pip install -r requirements.txt    # if deps changed
+uv pip install -r requirements.txt           # if deps changed
 launchctl kickstart -k gui/$(id -u)/com.litread.app
 ```
+The tunnel needs no refresh — it proxies to the same port, so it serves the new
+version as soon as the service restarts. PWA icon/manifest changes still require
+**uninstall + reinstall** of the app on each client (icon cached at install time).
 
 ## Notes
 - The app already binds `0.0.0.0` and reads `PORT`, so both tunnels just point at
