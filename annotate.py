@@ -35,14 +35,18 @@ PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
 REGION_PROMPT = """You are a clear, plain-spoken science communicator.
 
 The user selected a region of a research paper; you are given the text from that region.
-Explain what it says in plain, layman's terms as 2 to 4 short bullet points. Put each
-bullet on its own line starting with "- ", one idea per bullet, no jargon (define any
-unavoidable term in a few words). **Bold the most important term(s)** in each bullet using
-double asterisks, e.g. "- The model uses **contrastive learning** to ...". If it is an
-equation, say in words what it computes or represents. Stay grounded in the given text;
-do not invent results.
+Explain it in plain, layman's terms in this EXACT shape:
+- FIRST line: a punchy one-line title (<=12 words) capturing the whole selection. No "- "
+  prefix, no markdown heading — just the sentence.
+- THEN 2 to 4 bullet lines, each starting with "- ", one idea per bullet, no jargon
+  (define any unavoidable term in a few words).
 
-Output ONLY the bullet lines (each starting with "- "), nothing else."""
+**Bold the key terms generously** in BOTH the title and the bullets using double asterisks
+(e.g. **contrastive learning**, **48% accuracy**) so the important words pop for quick
+scanning — aim for 1-3 bold terms per line. If it is an equation, say in words what it
+computes or represents. Stay grounded in the given text; do not invent results.
+
+Output ONLY the title line followed by the bullet lines, nothing else."""
 
 
 # -----------------------------------------------------------------------------
@@ -183,16 +187,32 @@ def _placeholder(msg: str = "Load a paper, then drag a box over any region to su
     return f'<div class="lr-empty">{html.escape(msg)}</div>'
 
 
-def _bullets_html(summary: str) -> str:
-    """Render the summary (LLM returns '- ' bullet lines) as a <ul>. Falls back to a
-    single bullet for one-line messages (e.g. warnings)."""
-    lines = [re.sub(r"^\s*[-*•·]\s*", "", ln).strip() for ln in (summary or "").splitlines()]
-    items = [ln for ln in lines if ln]
-    if not items:
-        t = (summary or "").strip()
-        items = [t] if t else []
-    lis = "".join(f"<li>{core.escape_with_bold(it)}</li>" for it in items)
-    return f'<ul class="lr-bullets">{lis}</ul>'
+def _summary_html(summary: str) -> str:
+    """Render the LLM summary: the first non-bullet line becomes a bold title, the
+    following '- ' lines become bullets. Both keep **bold** markup. Degrades
+    gracefully for one-line / mid-stream text (just a title)."""
+    raw = (summary or "").strip()
+    if not raw:
+        return ""
+    title = ""
+    bullets = []
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if re.match(r"^[-*•·]\s+", s):
+            bullets.append(re.sub(r"^[-*•·]\s+", "", s).strip())
+        elif not title:
+            title = s
+        else:
+            bullets.append(s)
+    parts = []
+    if title:
+        parts.append(f'<div class="lr-note-title">{core.escape_with_bold(title)}</div>')
+    if bullets:
+        lis = "".join(f"<li>{core.escape_with_bold(b)}</li>" for b in bullets)
+        parts.append(f'<ul class="lr-bullets">{lis}</ul>')
+    return "".join(parts)
 
 
 def render_reader(state: Optional[Dict[str, Any]]) -> str:
@@ -226,7 +246,7 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
     parts = [
         f'<div class="lr-header"><h2 class="lr-title">{title}</h2>'
         f'<p class="lr-authors">{authors}</p></div>',
-        '<div class="lr-hint">Drag a box to summarise a region. Hold <b>Shift</b> and drag to '
+        '<div class="lr-hint">Drag a box to summarise a region. Hold <b>⌘/Ctrl</b> and drag to '
         'add more regions (even across pages), then click <b>Summarise</b> to combine them.</div>',
     ]
 
@@ -252,7 +272,7 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
                 f'data-top="{round(top0 * 100, 2)}" style="top:{_pct(top0)}" '
                 f'onclick="lrFlash(\'lr-box-{s["n"]}\')">'
                 f'<span class="lr-note-num">{s["n"]}</span>'
-                f'<span class="lr-note-body">{_bullets_html(s["summary"])}</span>'
+                f'<span class="lr-note-body">{_summary_html(s["summary"])}</span>'
                 f'<button class="lr-del" title="Remove this annotation" '
                 f'onclick="event.stopPropagation(); window.lrDelete({s["n"]})">✕</button>'
                 f'</div>'
