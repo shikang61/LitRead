@@ -1124,7 +1124,13 @@ img.recent-push { width: 0; height: 0; }
 .lr-bullets li::before { content: "•"; color: #6366f1; position: absolute; left: 0; top: 0; }
 .lr-bullets strong { color: #4f46e5; font-weight: 600; }
 .lr-note-title { font-weight: 700; color: #0f172a; line-height: 1.35; margin-bottom: 0.4em; }
-.lr-note-title strong { color: #4f46e5; }
+/* Title stays one consistent colour/weight; key terms are underlined instead. */
+.lr-note-title strong {
+    color: inherit; font-weight: inherit;
+    text-decoration: underline;
+    text-decoration-color: #6366f1;
+    text-underline-offset: 2px;
+}
 #reader .lr-note-title { font-size: 14px !important; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
