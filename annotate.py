@@ -361,7 +361,7 @@ def _pngs_exist(paths: List[str]) -> bool:
 # -----------------------------------------------------------------------------
 # Orchestration — generator yielding (status_md, reader_html) for Gradio.
 # -----------------------------------------------------------------------------
-def annotate_paper(url: str, provider: str):
+def annotate_paper(url: str, provider: str, force: bool = False):
     model_name = PROVIDERS[provider]["model"]
     placeholder = '<div class="lr-empty">Annotated paper will appear here.</div>'
 
@@ -372,7 +372,7 @@ def annotate_paper(url: str, provider: str):
 
     ckey = core.cache_key(aid, provider, model_name, ANNOTATE_VERSION)
     cached = core.cache_get(ckey)
-    if cached and _pngs_exist(cached.get("pngs", [])):
+    if cached and not force and _pngs_exist(cached.get("pngs", [])):
         reader = _header_html(cached.get("meta", {})) + render_reader_html(
             cached["pages_meta"], _png_urls(cached["pngs"]), cached["annotations"]
         )

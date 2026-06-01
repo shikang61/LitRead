@@ -345,7 +345,7 @@ def render_recent_push(aid: str, title: str) -> str:
 # -----------------------------------------------------------------------------
 # Main callback — yields (status_md, output_html, cost_html).
 # -----------------------------------------------------------------------------
-def generate_carousel(url: str, provider: str):
+def generate_carousel(url: str, provider: str, force: bool = False):
     model_name = PROVIDERS[provider]["model"]
     initial_cost = render_cost_html(model_name)
 
@@ -361,7 +361,7 @@ def generate_carousel(url: str, provider: str):
     # ---- Cache hit short-circuits both arxiv fetch AND the LLM call. -------
     ckey = cache_key(aid, provider, model_name, PROMPT_VERSION)
     cached = cache_get(ckey)
-    if cached:
+    if cached and not force:
         meta_c = cached.get("meta", {})
         title_c = meta_c.get("title", "Unknown")
         bibtex_c = make_bibtex(
@@ -710,6 +710,8 @@ CSS = """
 }
 #url-box { width: 100%; }
 #generate-row { justify-content: center; margin-top: 1em; gap: 0.6em; }
+#force-row { justify-content: center; margin-top: 0.5em; }
+#force-toggle { color: #6b7280; font-size: 0.9em; }
 
 /* ---- Status + output ---- */
 #status {
@@ -774,7 +776,12 @@ CSS = """
     overflow-y: auto;
     overflow-x: hidden;
     padding: 1em 0.9em 1em 1em;
-    z-index: 5;
+    z-index: 20;
+    /* Solid panel so the rail reads as a sidebar and never shows content through it. */
+    background: #f9fafb;
+    border-right: 1px solid #e9ebf0;
+    border-radius: 0 12px 12px 0;
+    box-shadow: 1px 0 4px rgba(0,0,0,0.03);
     transition: width 0.2s ease, padding 0.2s ease;
 }
 /* Collapse / expand chevron (glyph supplied by ::before per state). */
@@ -858,13 +865,12 @@ body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em a
     :root { --lr-gutter: 256px; }                  /* 240 rail + 16 gap */
     body.lr-rail-collapsed { --lr-gutter: 64px; }  /* 48 strip + 16 gap */
     #center-stack, #status, #output, #reader {
-        margin-left: auto !important;
+        /* Centre when there's room, but never let the left edge cross the rail:
+           margin-left floors at the gutter, so overlap is impossible. */
+        margin-left: max(var(--lr-gutter), calc((100vw - 1100px) / 2)) !important;
         margin-right: auto !important;
-        /* Symmetric shrink by 2x the gutter keeps content screen-centred AND
-           clear of the fixed rail: a centred block's left edge = gutter + 2em,
-           which is always wider than the rail. */
-        max-width: min(1100px, calc(100vw - var(--lr-gutter) * 2 - 4em)) !important;
-        transition: max-width 0.2s ease;
+        max-width: min(1100px, calc(100vw - var(--lr-gutter) - 3em)) !important;
+        transition: margin-left 0.2s ease, max-width 0.2s ease;
     }
 }
 /* Hide the rail on narrow screens (no recents UI); content uses full width. */
@@ -1324,6 +1330,13 @@ def build_ui() -> gr.Blocks:
             with gr.Row(elem_id="generate-row"):
                 generate_btn = gr.Button("✨ Generate Carousel", variant="primary")
                 annotate_btn = gr.Button("🔎 Annotate Paper", variant="secondary")
+            with gr.Row(elem_id="force-row"):
+                force = gr.Checkbox(
+                    label="↻ Force regenerate (ignore cache)",
+                    value=False,
+                    elem_id="force-toggle",
+                    container=False,
+                )
 
         status = gr.Markdown("_Ready._", elem_id="status")
         output = gr.HTML(value="", elem_id="output")
@@ -1338,14 +1351,14 @@ def build_ui() -> gr.Blocks:
         for trigger in (url.submit, generate_btn.click):
             trigger(
                 generate_carousel,
-                inputs=[url, provider],
+                inputs=[url, provider, force],
                 outputs=[status, output, cost],
             )
 
         # Annotated reader shares the URL bar + provider, renders into #reader.
         annotate_btn.click(
             annotate.annotate_paper,
-            inputs=[url, provider],
+            inputs=[url, provider, force],
             outputs=[status, reader],
         )
 
