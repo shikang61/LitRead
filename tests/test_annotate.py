@@ -61,15 +61,42 @@ def test_parse_selection_malformed():
 # ---- append_summary ---------------------------------------------------------
 def test_append_summary_numbers_and_accumulates_tokens():
     state = {"summaries": [], "in_tok": 0, "out_tok": 0}
-    s1 = annotate.append_summary(state, {"page": 0, "rect": [0, 0, 1, 1]}, "txt", "sum1", 10, 5)
+    s1 = annotate.append_summary(state, [{"page": 0, "rect": [0, 0, 1, 1]}], "txt", "sum1", 10, 5)
     assert s1["summaries"][0]["n"] == 1
+    assert s1["summaries"][0]["regions"] == [{"page": 0, "rect": [0, 0, 1, 1]}]
     assert (s1["in_tok"], s1["out_tok"]) == (10, 5)
-    s2 = annotate.append_summary(s1, {"page": 1, "rect": [0, 0, 1, 1]}, "t2", "sum2", 7, 3)
+    s2 = annotate.append_summary(s1, [{"page": 1, "rect": [0, 0, 1, 1]}], "t2", "sum2", 7, 3)
     assert s2["summaries"][1]["n"] == 2
     assert (s2["in_tok"], s2["out_tok"]) == (17, 8)
     # original state untouched (no mutation)
     assert state["summaries"] == []
-    assert s1["summaries"] == [s1["summaries"][0]]
+
+
+# ---- parse_regions ----------------------------------------------------------
+def test_parse_regions_multi():
+    raw = '{"regions":[{"page":0,"rect":[0.1,0.2,0.5,0.4]},{"page":1,"rect":[0.0,0.0,0.3,0.3]}]}'
+    out = annotate.parse_regions(raw, n_pages=2)
+    assert len(out) == 2 and out[0]["page"] == 0 and out[1]["page"] == 1
+
+
+def test_parse_regions_rejects_legacy_empty_and_invalid():
+    assert annotate.parse_regions('{"page":0,"rect":[0,0,1,1]}', 1) is None      # legacy single
+    assert annotate.parse_regions('{"regions":[]}', 1) is None                   # empty
+    assert annotate.parse_regions('{"regions":[{"page":0,"rect":[0.1,0.2,0.105,0.21]}]}', 1) is None  # tiny
+    assert annotate.parse_regions('{"regions":[{"page":9,"rect":[0,0,1,1]}]}', 1) is None  # bad page
+
+
+def test_extract_regions_text_concatenates():
+    doc = fitz.open()
+    p0 = doc.new_page(width=300, height=400)
+    p0.insert_text((40, 100), "Alpha region one")
+    p1 = doc.new_page(width=300, height=400)
+    p1.insert_text((40, 120), "Beta region two")
+    pdf_bytes = doc.tobytes()
+    regions = [{"page": 0, "rect": [0.0, 0.18, 1.0, 0.32]},
+               {"page": 1, "rect": [0.0, 0.22, 1.0, 0.38]}]
+    txt = annotate.extract_regions_text(pdf_bytes, regions)
+    assert "Alpha" in txt and "Beta" in txt
 
 
 # ---- render_reader ----------------------------------------------------------
@@ -106,14 +133,31 @@ def test_render_reader_has_page_drawlayer_and_summary():
         "title": "My <Paper>", "authors": "A. Author",
         "pages_meta": [{"page": 0, "width": 300, "height": 400}],
         "pngs": ["cache/pages/x_p0.png"],
-        "summaries": [{"n": 1, "page": 0, "rect": [0.1, 0.2, 0.5, 0.4],
+        "summaries": [{"n": 1, "regions": [{"page": 0, "rect": [0.1, 0.2, 0.5, 0.4]}],
                        "text": "t", "summary": "in plain terms it says X"}],
         "in_tok": 0, "out_tok": 0, "model": "grok-4.3",
     }
     out = annotate.render_reader(state)
     assert 'class="lr-drawlayer" data-page="0"' in out   # drag capture layer
     assert "lr-page-img" in out
-    assert "lr-box-1" in out                              # selection marker
+    assert 'id="lr-box-1"' in out                         # selection marker
     assert "10.0%" in out                                 # marker left = x0 0.1
     assert "in plain terms it says X" in out              # summary card
     assert "My &lt;Paper&gt;" in out                      # title escaped
+
+
+def test_render_reader_multi_region_markers():
+    state = {
+        "title": "T", "authors": "A",
+        "pages_meta": [{"page": 0, "width": 300, "height": 400},
+                       {"page": 1, "width": 300, "height": 400}],
+        "pngs": ["a.png", "b.png"],
+        "summaries": [{"n": 1, "text": "t", "summary": "combined",
+                       "regions": [{"page": 0, "rect": [0.1, 0.1, 0.5, 0.3]},
+                                   {"page": 1, "rect": [0.0, 0.0, 0.4, 0.2]}]}],
+        "in_tok": 0, "out_tok": 0, "model": "grok-4.3",
+    }
+    out = annotate.render_reader(state)
+    assert 'id="lr-box-1"' in out        # first region marker (page 0)
+    assert 'id="lr-box-1-1"' in out      # second region marker (page 1)
+    assert out.count("combined") == 1    # exactly one summary card

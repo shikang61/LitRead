@@ -1011,6 +1011,34 @@ img.recent-push { width: 0; height: 0; }
     pointer-events: none;
     z-index: 3;
 }
+/* A pending (Shift-added) region awaiting combine. */
+.lr-pending-box {
+    position: absolute;
+    border: 1.5px dashed #f59e0b;
+    background: rgba(245,158,11,0.13);
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 3;
+}
+/* Floating toolbar shown while pending regions exist. */
+.lr-pending-bar {
+    position: fixed;
+    left: 50%; transform: translateX(-50%);
+    bottom: 18px;
+    display: none;
+    align-items: center; gap: 0.6em;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 999px;
+    padding: 0.5em 0.9em; box-shadow: 0 4px 14px rgba(0,0,0,0.14);
+    z-index: 50; font-size: 0.95em; color: #374151;
+}
+.lr-pending-bar button {
+    border: none; border-radius: 999px; padding: 0.35em 0.95em;
+    cursor: pointer; font-weight: 600; font-family: inherit;
+}
+.lr-pb-go { background: #6366f1; color: #fff; }
+.lr-pb-go:hover { background: #4f46e5; }
+.lr-pb-clear { background: #f3f4f6; color: #4b5563; }
+.lr-pb-clear:hover { background: #e5e7eb; }
 /* Marker drawn at a saved selection. */
 .lr-sel {
     position: absolute;
@@ -1269,33 +1297,72 @@ window.lrDelete = function(n) {
   if (btn) btn.click();
 };
 
-// ---- Interactive reader: drag a box on a page -> summarise that region ----
-// On mouseup the drag rect (page-relative 0-1 fractions) + page index are written
-// to the hidden #lr-selection textbox and the hidden #lr-summarize button is
-// clicked, which runs the server-side summary and re-renders the reader.
+// ---- Interactive reader: drag to summarise; Shift+drag to add regions -------
+// Plain drag -> one-region summary. Shift+drag -> add a pending region (amber
+// dashed box); the toolbar's "Summarise" combines all pending regions into one
+// annotation. Submits send {regions:[{page,rect}, ...]} to #lr-selection.
 (function() {
-  function setSelectionAndSubmit(page, rect) {
+  var pending = [];   // [{page, rect, el}]
+
+  function submitRegions(regions) {
     var box = document.getElementById('lr-selection');
     var ta = box ? (box.matches('textarea,input') ? box : box.querySelector('textarea, input')) : null;
     if (!ta) return;
+    var payload = JSON.stringify({ regions: regions });
     var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-    if (ta.tagName === 'TEXTAREA' && setter && setter.set) { setter.set.call(ta, JSON.stringify({ page: page, rect: rect })); }
-    else { ta.value = JSON.stringify({ page: page, rect: rect }); }
+    if (ta.tagName === 'TEXTAREA' && setter && setter.set) { setter.set.call(ta, payload); }
+    else { ta.value = payload; }
     ta.dispatchEvent(new Event('input', { bubbles: true }));
-    // gr.Button puts the elem_id on the <button> itself.
     var btn = document.getElementById('lr-summarize');
     if (btn && btn.tagName !== 'BUTTON') btn = btn.querySelector('button') || btn;
     if (btn) btn.click();
+  }
+
+  function toolbar() {
+    var tb = document.getElementById('lr-pending-bar');
+    if (!tb) {
+      tb = document.createElement('div');
+      tb.id = 'lr-pending-bar';
+      tb.className = 'lr-pending-bar';
+      document.body.appendChild(tb);
+    }
+    if (!pending.length) { tb.style.display = 'none'; return; }
+    tb.style.display = 'flex';
+    tb.innerHTML = '<span>' + pending.length + ' region' + (pending.length > 1 ? 's' : '') +
+      ' selected</span><button class="lr-pb-go">Summarise</button>' +
+      '<button class="lr-pb-clear">Clear</button>';
+    tb.querySelector('.lr-pb-go').onclick = submitPending;
+    tb.querySelector('.lr-pb-clear').onclick = clearPending;
+  }
+  function clearPending() {
+    pending.forEach(function(p) { if (p.el) p.el.remove(); });
+    pending = [];
+    toolbar();
+  }
+  function submitPending() {
+    if (!pending.length) return;
+    var regions = pending.map(function(p) { return { page: p.page, rect: p.rect }; });
+    pending.forEach(function(p) { if (p.el) p.el.remove(); });
+    pending = [];
+    toolbar();
+    submitRegions(regions);
+  }
+
+  function rectsOverlap(a, b) {
+    return !(a[2] <= b[0] || a[0] >= b[2] || a[3] <= b[1] || a[1] >= b[3]);
   }
 
   function attach(layer) {
     if (layer.__lrDrag) return;
     layer.__lrDrag = true;
     var start = null, rubber = null;
+    var pageEl = layer.parentElement;
+    var pno = parseInt(layer.dataset.page, 10);
+
     layer.addEventListener('mousedown', function(e) {
       if (e.button !== 0) return;
       var r = layer.getBoundingClientRect();
-      start = { x: e.clientX - r.left, y: e.clientY - r.top };
+      start = { x: e.clientX - r.left, y: e.clientY - r.top, shift: e.shiftKey };
       rubber = document.createElement('div');
       rubber.className = 'lr-rubber';
       layer.appendChild(rubber);
@@ -1310,30 +1377,47 @@ window.lrDelete = function(n) {
       rubber.style.width = Math.abs(x - start.x) + 'px';
       rubber.style.height = Math.abs(y - start.y) + 'px';
     });
-    function overlapsExisting(x0, y0, x1, y1) {
-      var page = layer.parentElement;
-      if (!page) return null;
-      var sels = page.querySelectorAll('.lr-sel');
+
+    function savedHit(rect) {  // overlaps an already-saved marker on this page?
+      var sels = pageEl.querySelectorAll('.lr-sel');
       for (var i = 0; i < sels.length; i++) {
         var s = sels[i];
-        var sx0 = parseFloat(s.style.left) / 100, sy0 = parseFloat(s.style.top) / 100;
-        var sx1 = sx0 + parseFloat(s.style.width) / 100, sy1 = sy0 + parseFloat(s.style.height) / 100;
-        if (!(x1 <= sx0 || x0 >= sx1 || y1 <= sy0 || y0 >= sy1)) return s;  // intersects
+        var l = parseFloat(s.style.left) / 100, t = parseFloat(s.style.top) / 100;
+        if (rectsOverlap(rect, [l, t, l + parseFloat(s.style.width) / 100, t + parseFloat(s.style.height) / 100])) return s;
       }
       return null;
     }
+    function pendingHit(rect) {
+      for (var i = 0; i < pending.length; i++) {
+        if (pending[i].page === pno && rectsOverlap(rect, pending[i].rect)) return true;
+      }
+      return false;
+    }
+
     function finish(e) {
       if (!start) return;
+      var shift = start.shift || e.shiftKey;
       var r = layer.getBoundingClientRect();
       var x = e.clientX - r.left, y = e.clientY - r.top;
-      var x0 = Math.min(start.x, x) / r.width, x1 = Math.max(start.x, x) / r.width;
-      var y0 = Math.min(start.y, y) / r.height, y1 = Math.max(start.y, y) / r.height;
+      var rect = [Math.min(start.x, x) / r.width, Math.min(start.y, y) / r.height,
+                  Math.max(start.x, x) / r.width, Math.max(start.y, y) / r.height];
       if (rubber) { rubber.remove(); rubber = null; }
       start = null;
-      if ((x1 - x0) <= 0.01 || (y1 - y0) <= 0.01) return;   // too small — ignore
-      var hit = overlapsExisting(x0, y0, x1, y1);
-      if (hit) { if (hit.id) window.lrFlash(hit.id); return; }  // already summarised — reject
-      setSelectionAndSubmit(parseInt(layer.dataset.page, 10), [x0, y0, x1, y1]);
+      if ((rect[2] - rect[0]) <= 0.01 || (rect[3] - rect[1]) <= 0.01) return;  // too small
+      var hit = savedHit(rect);
+      if (hit) { if (hit.id) window.lrFlash(hit.id); return; }   // overlaps a saved annotation
+      if (pendingHit(rect)) return;                              // overlaps a pending region
+      if (shift) {
+        var el = document.createElement('div');
+        el.className = 'lr-pending-box';
+        el.style.left = (rect[0] * 100) + '%'; el.style.top = (rect[1] * 100) + '%';
+        el.style.width = ((rect[2] - rect[0]) * 100) + '%'; el.style.height = ((rect[3] - rect[1]) * 100) + '%';
+        pageEl.appendChild(el);
+        pending.push({ page: pno, rect: rect, el: el });
+        toolbar();
+      } else {
+        submitRegions([{ page: pno, rect: rect }]);
+      }
     }
     layer.addEventListener('mouseup', finish);
     layer.addEventListener('mouseleave', function(e) { if (start) finish(e); });
@@ -1342,11 +1426,16 @@ window.lrDelete = function(n) {
   function hook() {
     var r = document.getElementById('reader');
     if (!r) { setTimeout(hook, 300); return; }
-    var pending = null;
-    function scan() { r.querySelectorAll('.lr-drawlayer').forEach(attach); }
+    var t = null;
+    function scan() {
+      // drop pending boxes the server re-render detached, then (re)attach layers
+      pending = pending.filter(function(p) { return p.el && document.contains(p.el); });
+      toolbar();
+      r.querySelectorAll('.lr-drawlayer').forEach(attach);
+    }
     new MutationObserver(function() {
-      if (pending) clearTimeout(pending);
-      pending = setTimeout(scan, 100);
+      if (t) clearTimeout(t);
+      t = setTimeout(scan, 100);
     }).observe(r, { childList: true, subtree: true });
     scan();
   }

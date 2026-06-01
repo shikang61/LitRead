@@ -26,7 +26,7 @@ from core import PROVIDERS
 
 PAGE_ZOOM = 2.0                 # rasterise pages at 2x for a crisp base image
 MAX_FETCH_RETRIES = 4
-SUMMARY_CACHE_VERSION = "v1"     # bump to invalidate cached region summaries
+SUMMARY_CACHE_VERSION = "v2"     # bump to invalidate cached region summaries
 MIN_SELECTION_FRAC = 0.01       # ignore drags smaller than 1% of the page
 MAX_REGION_CHARS = 8000         # safety cap on text sent to the LLM per selection
 PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
@@ -83,17 +83,14 @@ def extract_region_text(pdf_bytes: bytes, page_index: int, rect: List[float]) ->
         return page.get_text("text", clip=clip).strip()
 
 
-def parse_selection(selection_json: str, n_pages: int) -> Optional[Dict[str, Any]]:
-    """Validate the JSON a drag emits. Returns {page, rect:[x0,y0,x1,y1]} or None for
-    malformed / out-of-range / too-small selections."""
-    try:
-        d = json.loads(selection_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    if not isinstance(d, dict):
-        return None
-    page = d.get("page")
-    rect = d.get("rect")
+def extract_regions_text(pdf_bytes: bytes, regions: List[Dict[str, Any]]) -> str:
+    """Concatenate the text under each region (in order), blank-line separated."""
+    parts = [extract_region_text(pdf_bytes, r["page"], r["rect"]) for r in regions]
+    return "\n\n".join(p for p in parts if p).strip()
+
+
+def _valid_region(page: Any, rect: Any, n_pages: int) -> Optional[Dict[str, Any]]:
+    """Validate one {page, rect} → normalised dict, or None."""
     if not isinstance(page, int) or page < 0 or page >= n_pages:
         return None
     if not (isinstance(rect, list) and len(rect) == 4):
@@ -109,6 +106,35 @@ def parse_selection(selection_json: str, n_pages: int) -> Optional[Dict[str, Any
     if (x1 - x0) < MIN_SELECTION_FRAC or (y1 - y0) < MIN_SELECTION_FRAC:
         return None
     return {"page": page, "rect": [x0, y0, x1, y1]}
+
+
+def parse_selection(selection_json: str, n_pages: int) -> Optional[Dict[str, Any]]:
+    """Validate a single-region drag {page, rect} → dict or None."""
+    try:
+        d = json.loads(selection_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    return _valid_region(d.get("page"), d.get("rect"), n_pages)
+
+
+def parse_regions(selection_json: str, n_pages: int) -> Optional[List[Dict[str, Any]]]:
+    """Validate a {"regions":[{page,rect},...]} payload. Returns a non-empty list of
+    normalised regions, or None if malformed / all-invalid."""
+    try:
+        d = json.loads(selection_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("regions"), list):
+        return None
+    out = []
+    for r in d["regions"]:
+        if isinstance(r, dict):
+            v = _valid_region(r.get("page"), r.get("rect"), n_pages)
+            if v:
+                out.append(v)
+    return out or None
 
 
 def _summary_cache_key(aid: str, provider: str, model: str) -> str:
@@ -128,19 +154,17 @@ def _persist_summaries(state: Dict[str, Any], provider: str) -> None:
 
 def append_summary(
     state: Dict[str, Any],
-    sel: Dict[str, Any],
+    regions: List[Dict[str, Any]],
     text: str,
     summary: str,
     in_tok: int,
     out_tok: int,
 ) -> Dict[str, Any]:
-    """Return a new state with the summary appended and token totals updated."""
+    """Return a new state with the summary (covering one or more regions) appended
+    and token totals updated."""
     sums = list(state.get("summaries", []))
     n = len(sums) + 1
-    sums.append({
-        "n": n, "page": sel["page"], "rect": sel["rect"],
-        "text": text, "summary": summary,
-    })
+    sums.append({"n": n, "regions": regions, "text": text, "summary": summary})
     new = dict(state)
     new["summaries"] = sums
     new["in_tok"] = state.get("in_tok", 0) + in_tok
@@ -180,32 +204,48 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
     authors = html.escape(str(state.get("authors", "Unknown")))
     png_urls = _png_urls(state.get("pngs", []))
     summaries = state.get("summaries", [])
-    by_page: Dict[int, List[Dict[str, Any]]] = {}
+
+    def _regions_of(s):
+        regs = s.get("regions")
+        if isinstance(regs, list) and regs:
+            return regs
+        if "rect" in s:                      # legacy single-region entry
+            return [{"page": s.get("page", 0), "rect": s["rect"]}]
+        return []
+
+    cards_by_page: Dict[int, List[Dict[str, Any]]] = {}        # first-region page -> summaries
+    markers_by_page: Dict[int, List[Any]] = {}                 # page -> (summary, idx, region)
     for s in summaries:
-        by_page.setdefault(s["page"], []).append(s)
+        regs = _regions_of(s)
+        if not regs:
+            continue
+        cards_by_page.setdefault(regs[0]["page"], []).append(s)
+        for i, reg in enumerate(regs):
+            markers_by_page.setdefault(reg["page"], []).append((s, i, reg))
 
     parts = [
         f'<div class="lr-header"><h2 class="lr-title">{title}</h2>'
         f'<p class="lr-authors">{authors}</p></div>',
-        '<div class="lr-hint">Drag a box over any region of a page to get a plain-English summary.</div>',
+        '<div class="lr-hint">Drag a box to summarise a region. Hold <b>Shift</b> and drag to '
+        'add more regions (even across pages), then click <b>Summarise</b> to combine them.</div>',
     ]
 
     for pm in state["pages_meta"]:
         pno = pm["page"]
         url = png_urls[pno] if pno < len(png_urls) else ""
-        page_sels = by_page.get(pno, [])
 
         markers = []
-        for s in page_sels:
-            x0, y0, x1, y1 = s["rect"]
+        for s, i, reg in markers_by_page.get(pno, []):
+            x0, y0, x1, y1 = reg["rect"]
+            mid = f'lr-box-{s["n"]}' if i == 0 else f'lr-box-{s["n"]}-{i}'
             markers.append(
-                f'<div class="lr-sel" id="lr-box-{s["n"]}" '
+                f'<div class="lr-sel" id="{mid}" '
                 f'style="left:{_pct(x0)};top:{_pct(y0)};width:{_pct(x1 - x0)};height:{_pct(y1 - y0)}">'
                 f'<span class="lr-box-num">{s["n"]}</span></div>'
             )
 
         cards = []
-        for s in page_sels:
+        for s in cards_by_page.get(pno, []):
             cards.append(
                 f'<div class="lr-note" id="lr-note-{s["n"]}" data-target="lr-box-{s["n"]}" '
                 f'onclick="lrFlash(\'lr-box-{s["n"]}\')">'
@@ -328,7 +368,8 @@ def delete_summary(state: Optional[Dict[str, Any]], n_json: str, provider: str):
 
 
 def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provider: str):
-    """Summarise the text under a drawn box. Returns (reader_html, cost_html, state)."""
+    """Summarise the text under one or more drawn boxes (combined). Returns
+    (reader_html, cost_html, state)."""
     model = PROVIDERS[provider]["model"]
     if not state or not state.get("pdf_bytes"):
         return _placeholder(), core.render_cost_html(model), state
@@ -336,13 +377,13 @@ def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provi
     def _out(st):
         return _render_out(st, provider)
 
-    sel = parse_selection(selection_json, len(state["pages_meta"]))
-    if sel is None:
+    regions = parse_regions(selection_json, len(state["pages_meta"]))
+    if not regions:
         return _out(state)  # malformed/tiny selection — ignore
 
-    text = extract_region_text(state["pdf_bytes"], sel["page"], sel["rect"])
+    text = extract_regions_text(state["pdf_bytes"], regions)
     if not text:
-        new = append_summary(state, sel, "", "No selectable text in that region.", 0, 0)
+        new = append_summary(state, regions, "", "No selectable text in that region.", 0, 0)
         _persist_summaries(new, provider)
         return _out(new)
 
@@ -350,14 +391,14 @@ def summarize_region(state: Optional[Dict[str, Any]], selection_json: str, provi
     api_key = os.getenv(env_key, "").strip()
     if not api_key:
         # Don't cache a transient "set your key" message.
-        return _out(append_summary(state, sel, text, f"⚠️ Set {env_key} in .env to summarise.", 0, 0))
+        return _out(append_summary(state, regions, text, f"⚠️ Set {env_key} in .env to summarise.", 0, 0))
 
     try:
         summary, in_tok, out_tok = _summarize_text(text, provider, api_key)
     except Exception as e:
         # Don't cache a transient error.
-        return _out(append_summary(state, sel, text, f"⚠️ Summary failed: {type(e).__name__}: {e}", 0, 0))
+        return _out(append_summary(state, regions, text, f"⚠️ Summary failed: {type(e).__name__}: {e}", 0, 0))
 
-    new = append_summary(state, sel, text, summary, in_tok, out_tok)
+    new = append_summary(state, regions, text, summary, in_tok, out_tok)
     _persist_summaries(new, provider)
     return _out(new)
