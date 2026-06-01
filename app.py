@@ -763,7 +763,8 @@ CSS = """
 .cost-bar-amber { background: #f59e0b; }
 .cost-bar-red   { background: #ef4444; }
 
-/* ---- Recent papers (left rail sidebar) ---- */
+/* ---- Recent papers (collapsible left rail) ---- */
+:root { --lr-gutter: 0px; }
 #recent-papers {
     position: fixed;
     top: 90px;
@@ -771,9 +772,27 @@ CSS = """
     width: 240px;
     max-height: calc(100vh - 110px);
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 1em 0.9em 1em 1em;
     z-index: 10;
+    transition: width 0.2s ease, padding 0.2s ease;
 }
+/* Collapse / expand chevron (glyph supplied by ::before per state). */
+.recent-toggle {
+    position: absolute;
+    top: 0.55em; right: 0.5em;
+    width: 26px; height: 26px;
+    border: none; background: none; cursor: pointer;
+    color: #9ca3af; font-size: 1.2em; line-height: 1;
+    border-radius: 7px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+}
+.recent-toggle:hover { background: #eef2ff; color: #6366f1; }
+body:not(.lr-rail-collapsed) .recent-toggle::before { content: '‹'; }
+body.lr-rail-collapsed .recent-toggle::before { content: '›'; }
+.recent-collapsed-icon { display: none; font-size: 1.35em; cursor: pointer; margin-top: 2.6em; text-align: center; }
+body.lr-rail-collapsed .recent-collapsed-icon { display: block; }
 .recent-header {
     font-size: 0.85em;
     font-weight: 600;
@@ -782,6 +801,7 @@ CSS = """
     letter-spacing: 0.04em;
     margin-bottom: 0.6em;
     padding-left: 0.2em;
+    padding-right: 1.8em;   /* clear the toggle button */
 }
 .recent-empty-msg {
     font-size: 0.8em;
@@ -818,11 +838,25 @@ CSS = """
     margin-top: 0.2em;
     font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
 }
-/* Push main content right of the sidebar on wide screens. */
+/* Collapsed: shrink to a thin strip, hide the body, centre the toggle. */
+body.lr-rail-collapsed #recent-papers { width: 48px; padding-left: 0; padding-right: 0; }
+body.lr-rail-collapsed .recent-body { display: none; }
+body.lr-rail-collapsed .recent-toggle { right: 50%; transform: translateX(50%); top: 0.5em; }
+
+/* Reserve a left gutter for the rail and offset the centred content into it so
+   the rail can never overlap the search bar/output. Viewport-based + shrink-to-
+   fit, so it holds regardless of Gradio's own container padding. */
 @media (min-width: 1100px) {
-    .gradio-container { padding-left: 270px !important; }
+    :root { --lr-gutter: 256px; }                  /* 240 rail + 16 gap */
+    body.lr-rail-collapsed { --lr-gutter: 64px; }  /* 48 strip + 16 gap */
+    #center-stack, #status, #output, #reader {
+        margin-left: var(--lr-gutter) !important;
+        margin-right: auto !important;
+        max-width: min(1100px, calc(100vw - var(--lr-gutter) - 4em)) !important;
+        transition: margin-left 0.2s ease, max-width 0.2s ease;
+    }
 }
-/* Hide sidebar on narrow screens — falls back to no recents UI. */
+/* Hide the rail on narrow screens (no recents UI); content uses full width. */
 @media (max-width: 1099px) {
     #recent-papers { display: none; }
 }
@@ -1001,6 +1035,7 @@ img.recent-push { width: 0; height: 0; }
 }
 .lr-box-equation { border-color: #f59e0b; background: rgba(245,158,11,0.07); }
 .lr-box-figure   { border-color: #10b981; background: rgba(16,185,129,0.07); }
+.lr-box-section  { border-color: #0ea5e9; border-style: dashed; background: rgba(14,165,233,0.06); }
 .lr-box-num {
     position: absolute;
     top: -11px; left: -11px;
@@ -1013,6 +1048,7 @@ img.recent-push { width: 0; height: 0; }
 }
 .lr-box-equation .lr-box-num { background: #f59e0b; }
 .lr-box-figure   .lr-box-num { background: #10b981; }
+.lr-box-section  .lr-box-num { background: #0ea5e9; }
 .lr-hl {
     position: absolute;
     background: rgba(250,204,21,0.45);
@@ -1050,6 +1086,7 @@ img.recent-push { width: 0; height: 0; }
 }
 .lr-kind-equation { color: #b45309; background: #fef3c7; }
 .lr-kind-figure   { color: #047857; background: #d1fae5; }
+.lr-kind-section  { color: #0369a1; background: #e0f2fe; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
@@ -1132,25 +1169,42 @@ window.LITREAD_RECENT = {
         return ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c];
       });
     };
+    var inner;
     if (!arr.length) {
-      box.innerHTML = '<div class="recent-empty">' +
-        '<div class="recent-header">Recent</div>' +
-        '<div class="recent-empty-msg">Papers you generate appear here.</div>' +
-        '</div>';
-      return;
+      inner = '<div class="recent-header">Recent</div>' +
+        '<div class="recent-empty-msg">Papers you generate appear here.</div>';
+    } else {
+      var lst = '<div class="recent-header">Recent</div><div class="recent-list">';
+      arr.forEach(function(e) {
+        var aSafe = e.aid.replace(/'/g, "\\'");
+        lst += '<button type="button" class="recent-item" ' +
+          'title="' + esc(e.title) + '\\n' + esc(e.aid) + '" ' +
+          'onclick="window.LITREAD_RECENT.load(\'' + aSafe + '\')">' +
+          '<div class="recent-title">' + esc(e.title || e.aid) + '</div>' +
+          '<div class="recent-aid">' + esc(e.aid) + '</div>' +
+          '</button>';
+      });
+      lst += '</div>';
+      inner = lst;
     }
-    var html = '<div class="recent-header">Recent</div><div class="recent-list">';
-    arr.forEach(function(e) {
-      var aSafe = e.aid.replace(/'/g, "\\'");
-      html += '<button type="button" class="recent-item" ' +
-        'title="' + esc(e.title) + '\\n' + esc(e.aid) + '" ' +
-        'onclick="window.LITREAD_RECENT.load(\'' + aSafe + '\')">' +
-        '<div class="recent-title">' + esc(e.title || e.aid) + '</div>' +
-        '<div class="recent-aid">' + esc(e.aid) + '</div>' +
-        '</button>';
-    });
-    html += '</div>';
-    box.innerHTML = html;
+    box.innerHTML =
+      '<button type="button" class="recent-toggle" aria-label="Toggle recent panel" ' +
+        'title="Collapse / expand" onclick="window.LITREAD_RECENT.toggle()"></button>' +
+      '<div class="recent-collapsed-icon" title="Expand" ' +
+        'onclick="window.LITREAD_RECENT.toggle()">📚</div>' +
+      '<div class="recent-body">' + inner + '</div>';
+  },
+  CKEY: 'litread.recent.collapsed',
+  isCollapsed: function() {
+    try { return localStorage.getItem(this.CKEY) === '1'; } catch (e) { return false; }
+  },
+  applyCollapsed: function() {
+    document.body.classList.toggle('lr-rail-collapsed', this.isCollapsed());
+  },
+  toggle: function() {
+    var next = !this.isCollapsed();
+    try { localStorage.setItem(this.CKEY, next ? '1' : '0'); } catch (e) {}
+    this.applyCollapsed();
   },
   load: function(aid) {
     var ta = document.querySelector('#url-box textarea');
@@ -1166,6 +1220,7 @@ function __mountRecent() {
   if (!document.getElementById('recent-papers')) {
     setTimeout(__mountRecent, 300); return;
   }
+  window.LITREAD_RECENT.applyCollapsed();
   window.LITREAD_RECENT.render();
 }
 if (document.readyState === 'loading') {

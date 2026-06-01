@@ -88,6 +88,12 @@ def test_parse_annotations_defaults_kind_and_coerces_keywords():
     assert out[0]["keywords"] == []
 
 
+def test_parse_annotations_keeps_section_kind():
+    raw = '{"annotations": [{"block_id": "p0_b0", "kind": "section", "note": "what this section does"}]}'
+    out = annotate.parse_annotations(raw, VALID)
+    assert out[0]["kind"] == "section"
+
+
 def test_parse_annotations_tolerates_code_fence():
     raw = '```json\n{"annotations": [{"block_id": "p0_b1", "note": "n"}]}\n```'
     out = annotate.parse_annotations(raw, VALID)

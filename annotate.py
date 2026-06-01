@@ -27,32 +27,42 @@ import core
 from core import PROVIDERS
 
 # Bump when ANNOTATE_PROMPT changes — invalidates cached annotations.
-ANNOTATE_VERSION = "v1"
+ANNOTATE_VERSION = "v2"
 
 PAGE_ZOOM = 2.0                 # rasterise pages at 2x for a crisp overlay base
 MAX_MANIFEST_CHARS = 120_000    # cap LLM input; long papers get tail-truncated
 MAX_FETCH_RETRIES = 4
 PNG_DIR = os.path.join(core.CACHE_DIR, "pages")
 
-VALID_KINDS = {"paragraph", "equation", "figure"}
+VALID_KINDS = {"section", "paragraph", "equation", "figure"}
 
 
 # -----------------------------------------------------------------------------
 # System prompt — strict JSON, selective key-bits-only annotations.
 # -----------------------------------------------------------------------------
-ANNOTATE_PROMPT = """You annotate a research paper so a reader can skim its key points fast.
+ANNOTATE_PROMPT = """You annotate a research paper so a reader can skim it section by section and
+understand what every part is doing, then dive into the bits they care about.
 
 You receive a list of the paper's text blocks, one per line, formatted:
     <block_id>: <block text>
 Image/figure blocks appear as:
     <block_id>: [FIGURE]
 
-Pick ONLY the high-signal blocks — the ones that carry the paper's actual argument:
-the core claim, the method, the key equation, an important figure, the headline result.
-SKIP filler: transitions, boilerplate, setup prose, related-work lists, acknowledgements.
-Aim for roughly 5-10 annotations per page of the paper, fewer if a page is thin.
+Annotate THOROUGHLY — aim for broad coverage, roughly 8-15 annotations per page:
 
-For each chosen block, write a one-line side-note (max ~15 words, plain English, active
+1. SECTION MAP (do this first): for EVERY section and major subsection (Abstract,
+   Introduction, Related Work, Method, Experiments, Results, Discussion, Conclusion,
+   appendices, etc.), emit ONE annotation of kind "section" on that section's heading or
+   first block, whose note states the POINT of the whole section in one line — why it's
+   there and what the reader gets from it. Do not skip a section.
+
+2. KEY POINTS within each section: add "paragraph" / "equation" / "figure" annotations
+   for the substantive content — the core claim, each method step, the key equations,
+   important figures/tables, the main results and comparisons. Most content-bearing
+   paragraphs should get a note. Only skip truly trivial blocks (page headers/footers,
+   author lists, pure citation lines, acknowledgements).
+
+For each annotation, write a one-line side-note (max ~16 words, plain English, active
 voice) saying what that block contributes — what a skimmer should take away from it.
 
 OUTPUT (strict JSON, no markdown fences, no commentary):
@@ -60,7 +70,7 @@ OUTPUT (strict JSON, no markdown fences, no commentary):
   "annotations": [
     {
       "block_id": "p2_b5",
-      "kind": "paragraph" | "equation" | "figure",
+      "kind": "section" | "paragraph" | "equation" | "figure",
       "note": "one-line plain-English takeaway for this block",
       "keywords": ["exact phrase from the block to highlight", "another"]
     }
@@ -70,10 +80,10 @@ OUTPUT (strict JSON, no markdown fences, no commentary):
 RULES:
 - "block_id" MUST be copied verbatim from the input. Never invent an ID.
 - "keywords": 1-4 short phrases that appear VERBATIM in that block's text (so they can be
-  located and highlighted). For [FIGURE] blocks use an empty list. If unsure a phrase is
-  present verbatim, omit it.
-- "kind": use "equation" for blocks that are mainly a formula, "figure" for [FIGURE]
-  blocks, "paragraph" otherwise.
+  located and highlighted). For [FIGURE] and most "section" blocks use an empty list. If
+  unsure a phrase is present verbatim, omit it.
+- "kind": "section" for a section/subsection purpose summary; "equation" for blocks that
+  are mainly a formula; "figure" for [FIGURE] blocks; "paragraph" otherwise.
 - Keep notes concrete and grounded in the block. Do not invent results or claims.
 - Output ONLY the JSON object.
 """
