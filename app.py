@@ -865,12 +865,13 @@ body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em a
     :root { --lr-gutter: 256px; }                  /* 240 rail + 16 gap */
     body.lr-rail-collapsed { --lr-gutter: 64px; }  /* 48 strip + 16 gap */
     #center-stack, #status, #output, #reader {
-        /* Centre when there's room, but never let the left edge cross the rail:
-           margin-left floors at the gutter, so overlap is impossible. */
-        margin-left: max(var(--lr-gutter), calc((100vw - 1100px) / 2)) !important;
+        /* Truly centred on the page (equal auto margins). Shrinking the max-width
+           by 2x the gutter guarantees the centred block's left edge stays clear
+           of the rail, so it centres without ever overlapping. */
+        margin-left: auto !important;
         margin-right: auto !important;
-        max-width: min(1100px, calc(100vw - var(--lr-gutter) - 3em)) !important;
-        transition: margin-left 0.2s ease, max-width 0.2s ease;
+        max-width: min(1100px, calc(100vw - var(--lr-gutter) * 2 - 4em)) !important;
+        transition: max-width 0.2s ease;
     }
 }
 /* Hide the rail on narrow screens (no recents UI); content uses full width. */
