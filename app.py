@@ -606,19 +606,24 @@ CSS = """
 }
 #topbar .prose h1 { margin: 0; font-size: 1.6em; }
 
-/* Right-side stack: model dropdown sits above the API-usage card, both same width. */
-#right-stack {
-    max-width: 320px;
-    min-width: 240px;
-    margin-left: auto;
+/* Right rail: Model dropdown + API-usage card, fixed like the Recent left rail. */
+#right-rail {
+    position: fixed;
+    top: 116px;
+    right: 0;
+    width: 240px;
+    max-height: calc(100vh - 136px);
+    overflow-y: auto;
+    padding: 0 0.9em 1em 0.6em;
+    z-index: 20;
     display: flex;
     flex-direction: column;
-    gap: 0.6em;
+    gap: 0.7em;
 }
-#right-stack > * { width: 100%; }
+#right-rail > * { width: 100%; }
 #provider-slot { width: 100%; }
-/* Allow flex children to shrink below their intrinsic content width. */
 #topbar > * { min-width: 0; }
+@media (max-width: 1099px) { #right-rail { display: none; } }
 
 /* Make room for the dropdown caret on the right edge of the value box. */
 #provider-slot input,
@@ -727,7 +732,6 @@ CSS = """
 .cost-bar-red   { background: #ef4444; }
 
 /* ---- Recent papers (collapsible left rail) ---- */
-:root { --lr-gutter: 0px; }
 #recent-papers {
     position: fixed;
     top: 116px;                 /* sit below the LitRead title row */
@@ -819,20 +823,13 @@ body.lr-rail-collapsed .recent-body { display: none; }
 /* In the thin strip the toggle flows at the top-centre (no fragile offsets). */
 body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em auto; }
 
-/* Reserve a left gutter for the rail and offset the centred content into it so
-   the rail can never overlap the search bar/output. Viewport-based + shrink-to-
-   fit, so it holds regardless of Gradio's own container padding. */
+/* Centre the content and reserve room on BOTH sides for the fixed rails (Recent
+   left, Model/Usage right) so neither overlaps the content. */
 @media (min-width: 1100px) {
-    :root { --lr-gutter: 256px; }                  /* 240 rail + 16 gap */
-    body.lr-rail-collapsed { --lr-gutter: 64px; }  /* 48 strip + 16 gap */
     #center-stack, #status, #output, #reader {
-        /* Truly centred on the page (equal auto margins). Shrinking the max-width
-           by 2x the gutter guarantees the centred block's left edge stays clear
-           of the rail, so it centres without ever overlapping. */
         margin-left: auto !important;
         margin-right: auto !important;
-        max-width: min(1100px, calc(100vw - var(--lr-gutter) * 2 - 4em)) !important;
-        transition: max-width 0.2s ease;
+        max-width: min(1100px, calc(100vw - 540px)) !important;
     }
 }
 /* Hide the rail on narrow screens (no recents UI); content uses full width. */
@@ -1348,22 +1345,23 @@ def build_ui() -> gr.Blocks:
         # recent paper titles. Hidden on narrow screens via media query.
         gr.HTML(value="", elem_id="recent-papers")
 
-        # ---- Top bar: title left, [Model + API Usage] stacked top-right ----
+        # ---- Right rail: Model picker + API-usage card (fixed, like Recent) ----
+        with gr.Column(elem_id="right-rail"):
+            provider = gr.Dropdown(
+                choices=list(PROVIDERS.keys()),
+                value=list(PROVIDERS.keys())[0],
+                label="Model",
+                container=True,
+                elem_id="provider-slot",
+                filterable=False,
+                allow_custom_value=False,
+                interactive=True,
+            )
+            cost = gr.HTML(value=initial_cost, elem_id="cost-panel")
+
+        # ---- Top bar: title ----
         with gr.Row(elem_id="topbar"):
-            with gr.Column(scale=4):
-                gr.Markdown("# 📚 LitRead")
-            with gr.Column(scale=1, min_width=260, elem_id="right-stack"):
-                provider = gr.Dropdown(
-                    choices=list(PROVIDERS.keys()),
-                    value=list(PROVIDERS.keys())[0],
-                    label="Model",
-                    container=True,
-                    elem_id="provider-slot",
-                    filterable=False,
-                    allow_custom_value=False,
-                    interactive=True,
-                )
-                cost = gr.HTML(value=initial_cost, elem_id="cost-panel")
+            gr.Markdown("# 📚 LitRead")
 
         # ---- Centered Google-style URL bar + button ----
         with gr.Column(elem_id="center-stack"):
