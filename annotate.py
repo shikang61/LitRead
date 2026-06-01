@@ -304,15 +304,17 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
 # -----------------------------------------------------------------------------
 def load_reader(url: str, provider: str, force: bool = False):
     """Fetch + rasterise a paper for interactive reading. Generator yielding
-    (reader_html, state). Runs alongside the carousel on the same button, so it
-    does not touch the shared status/cost panels (errors render in the reader)."""
+    (reader_html, state, sidebar_actions_html). Runs alongside the carousel on the
+    same button, so it does not touch the shared status/cost panels (errors render
+    in the reader). The sidebar actions are the paper link/export buttons in the
+    right rail; empty string until the paper's metadata is known."""
     model = PROVIDERS[provider]["model"]
     aid = core.extract_arxiv_id(url)
     if not aid:
-        yield _placeholder("Paste a valid ArXiv URL to load the PDF."), None
+        yield _placeholder("Paste a valid ArXiv URL to load the PDF."), None, ""
         return
 
-    yield _placeholder(f"Loading PDF for {aid} — drag a box once it appears…"), None
+    yield _placeholder(f"Loading PDF for {aid} — drag a box once it appears…"), None, ""
     pdf_bytes: Optional[bytes] = None
     meta: Optional[Dict[str, Any]] = None
     for attempt in range(MAX_FETCH_RETRIES):
@@ -324,14 +326,14 @@ def load_reader(url: str, provider: str, force: bool = False):
             retryable = status == 429 or (isinstance(status, int) and 500 <= status < 600)
             if retryable and attempt < MAX_FETCH_RETRIES - 1:
                 wait = (attempt + 1) * 5
-                yield _placeholder(f"ArXiv HTTP {status} — retrying in {wait}s…"), None
+                yield _placeholder(f"ArXiv HTTP {status} — retrying in {wait}s…"), None, ""
                 time.sleep(wait)
                 continue
-            yield _placeholder(f"Could not load PDF: {type(err).__name__}: {err}"), None
+            yield _placeholder(f"Could not load PDF: {type(err).__name__}: {err}"), None, ""
             return
 
     if pdf_bytes is None:
-        yield _placeholder(f"Paper {aid} not found."), None
+        yield _placeholder(f"Paper {aid} not found."), None, ""
         return
 
     with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
@@ -350,7 +352,17 @@ def load_reader(url: str, provider: str, force: bool = False):
     cached = core.cache_get(_summary_cache_key(aid, provider, model))
     if cached and isinstance(cached.get("summaries"), list):
         state["summaries"] = cached["summaries"]
-    yield render_reader(state), state
+
+    # Right-rail link/export buttons for this paper.
+    m = meta or {}
+    abs_url = m.get("AbsURL", f"https://arxiv.org/abs/{aid}")
+    pdf_url = m.get("PdfURL", f"https://arxiv.org/pdf/{aid}")
+    bibtex = core.make_bibtex(
+        aid, state["title"], m.get("AuthorsAll") or [],
+        int(m.get("Year", 0) or 0), abs_url,
+    )
+    actions_html = core.render_sidebar_actions_html(pdf_url, abs_url, bibtex, aid)
+    yield render_reader(state), state, actions_html
 
 
 def _render_out(state: Optional[Dict[str, Any]], provider: str):

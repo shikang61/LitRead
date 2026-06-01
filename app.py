@@ -8,7 +8,6 @@ Pipeline:
          -> Parse JSON -> render styled HTML card grid in Gradio
 """
 
-import base64
 import html
 import os
 import queue
@@ -178,42 +177,14 @@ def load_arxiv_paper(arxiv_id: str) -> List[Document]:
 # ---- HTML renderers --------------------------------------------------------
 
 
-def make_bibtex(arxiv_id: str, title: str, authors_all: List[str], year: int, abs_url: str) -> str:
-    """Build an arXiv-style BibTeX entry. Zotero auto-imports from a .bib download."""
-    first_surname = (authors_all[0].split()[-1] if authors_all else "anon").lower()
-    safe = re.sub(r"\W", "", f"{first_surname}{year}{arxiv_id.replace('.', '')}")
-    authors_joined = " and ".join(authors_all) if authors_all else "Unknown"
-    return (
-        f"@article{{{safe},\n"
-        f"  title         = {{{title}}},\n"
-        f"  author        = {{{authors_joined}}},\n"
-        f"  year          = {{{year or ''}}},\n"
-        f"  eprint        = {{{arxiv_id}}},\n"
-        f"  archivePrefix = {{arXiv}},\n"
-        f"  primaryClass  = {{cs.LG}},\n"
-        f"  url           = {{{abs_url}}}\n"
-        f"}}\n"
-    )
-
-
-def render_actions_html(pdf_url: str, abs_url: str, bibtex: str, arxiv_id: str) -> str:
-    bib_b64 = base64.b64encode(bibtex.encode("utf-8")).decode("ascii")
-    bib_name = f"{arxiv_id.replace('/', '_')}.bib"
+def render_actions_html() -> str:
+    """Card-level action(s). Paper link/export buttons live in the right rail
+    (see core.render_sidebar_actions_html); only the PNG capture stays here."""
     return (
         '<div class="action-row">'
         '<button type="button" class="action-btn" onclick="exportCardsToPng()">'
         '<span class="action-icon">📥</span> Export as PNG'
         '</button>'
-        f'<a class="action-btn" href="{html.escape(pdf_url)}" target="_blank" rel="noopener">'
-        '<span class="action-icon">📄</span> Open PDF'
-        '</a>'
-        f'<a class="action-btn" href="{html.escape(abs_url)}" target="_blank" rel="noopener">'
-        '<span class="action-icon">🔗</span> ArXiv Page'
-        '</a>'
-        f'<a class="action-btn" href="data:application/x-bibtex;base64,{bib_b64}" '
-        f'download="{html.escape(bib_name)}">'
-        '<span class="action-icon">📚</span> Export to Zotero (.bib)'
-        '</a>'
         '</div>'
     )
 
@@ -332,18 +303,12 @@ def generate_carousel(url: str, provider: str, force: bool = False):
     if cached and not force:
         meta_c = cached.get("meta", {})
         title_c = meta_c.get("title", "Unknown")
-        bibtex_c = make_bibtex(
-            aid, title_c, meta_c.get("authors_all") or [],
-            int(meta_c.get("year", 0) or 0), meta_c.get("abs_url", ""),
-        )
         header_c = render_paper_header_html(
             title_c, meta_c.get("authors", "Unknown"),
             meta_c.get("published", ""), int(meta_c.get("pages", 0) or 0),
             bool(meta_c.get("truncated", False)),
         )
-        actions_c = render_actions_html(
-            meta_c.get("pdf_url", ""), meta_c.get("abs_url", ""), bibtex_c, aid,
-        )
+        actions_c = render_actions_html()
         cards_c = render_cards_html(
             header_c, cached.get("hook", ""), cached.get("slides", []),
             actions_html=actions_c,
@@ -456,8 +421,7 @@ def generate_carousel(url: str, provider: str, force: bool = False):
     paper_text = docs[0].page_content[:MAX_PAPER_CHARS]
     truncated = len(docs[0].page_content) > MAX_PAPER_CHARS
     header_html = render_paper_header_html(title, authors, published, pages, truncated)
-    bibtex = make_bibtex(aid, title, authors_all, year, abs_url)
-    actions_html = render_actions_html(pdf_url, abs_url, bibtex, aid)
+    actions_html = render_actions_html()
 
     yield (
         f"✅ Fetched in {fetch_dt:.1f}s. Generating carousel…",
@@ -648,6 +612,11 @@ CSS = """
 #provider-slot { width: 100%; }
 #topbar > * { min-width: 0; }
 @media (max-width: 1099px) { #right-rail { display: none; } }
+
+/* ---- Right-rail paper actions (Open PDF / ArXiv Page / Zotero) ---- */
+#paper-actions:empty { display: none; }
+.sidebar-action-row { display: flex; flex-direction: column; gap: 0.5em; }
+.sidebar-action-row .action-btn { width: 100%; justify-content: flex-start; }
 
 /* Make room for the dropdown caret on the right edge of the value box. */
 #provider-slot input,
@@ -879,7 +848,7 @@ img.recent-push { width: 0; height: 0; }
     border-radius: 10px;
     background: #fff;
     color: #1f2937;
-    font-size: 1em;
+    font-size: 0.82em;
     font-weight: 500;
     cursor: pointer;
     text-decoration: none;
@@ -1546,6 +1515,7 @@ def build_ui() -> gr.Blocks:
                 interactive=True,
             )
             cost = gr.HTML(value=initial_cost, elem_id="cost-panel")
+            paper_actions = gr.HTML(value="", elem_id="paper-actions")
 
         # ---- Top bar: title ----
         with gr.Row(elem_id="topbar"):
@@ -1601,7 +1571,7 @@ def build_ui() -> gr.Blocks:
             ev.then(
                 annotate.load_reader,
                 inputs=[url, provider, force],
-                outputs=[reader, paper_state],
+                outputs=[reader, paper_state, paper_actions],
             )
 
         # Draw a box on the reader -> summarise that region (updates API Usage).

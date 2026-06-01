@@ -8,6 +8,7 @@ Kept in its own module so annotate.py can reuse them without a circular import
 against app.py (which imports annotate.py to wire its UI button).
 """
 
+import base64
 import hashlib
 import html
 import json
@@ -150,6 +151,44 @@ def fetch_pdf(arxiv_id: str) -> Tuple[Optional[bytes], Optional[Dict[str, Any]]]
         "Summary": (result.summary or "").strip(),
     }
     return pdf_bytes, metadata
+
+
+def make_bibtex(arxiv_id: str, title: str, authors_all: List[str], year: int, abs_url: str) -> str:
+    """Build an arXiv-style BibTeX entry. Zotero auto-imports from a .bib download."""
+    first_surname = (authors_all[0].split()[-1] if authors_all else "anon").lower()
+    safe = re.sub(r"\W", "", f"{first_surname}{year}{arxiv_id.replace('.', '')}")
+    authors_joined = " and ".join(authors_all) if authors_all else "Unknown"
+    return (
+        f"@article{{{safe},\n"
+        f"  title         = {{{title}}},\n"
+        f"  author        = {{{authors_joined}}},\n"
+        f"  year          = {{{year or ''}}},\n"
+        f"  eprint        = {{{arxiv_id}}},\n"
+        f"  archivePrefix = {{arXiv}},\n"
+        f"  primaryClass  = {{cs.LG}},\n"
+        f"  url           = {{{abs_url}}}\n"
+        f"}}\n"
+    )
+
+
+def render_sidebar_actions_html(pdf_url: str, abs_url: str, bibtex: str, arxiv_id: str) -> str:
+    """The paper link/export buttons shown in the right rail (vertical stack)."""
+    bib_b64 = base64.b64encode(bibtex.encode("utf-8")).decode("ascii")
+    bib_name = f"{arxiv_id.replace('/', '_')}.bib"
+    return (
+        '<div class="sidebar-action-row">'
+        f'<a class="action-btn" href="{html.escape(pdf_url)}" target="_blank" rel="noopener">'
+        '<span class="action-icon">📄</span> Open PDF'
+        '</a>'
+        f'<a class="action-btn" href="{html.escape(abs_url)}" target="_blank" rel="noopener">'
+        '<span class="action-icon">🔗</span> ArXiv Page'
+        '</a>'
+        f'<a class="action-btn" href="data:application/x-bibtex;base64,{bib_b64}" '
+        f'download="{html.escape(bib_name)}">'
+        '<span class="action-icon">📚</span> Export to Zotero (.bib)'
+        '</a>'
+        '</div>'
+    )
 
 
 # -----------------------------------------------------------------------------
