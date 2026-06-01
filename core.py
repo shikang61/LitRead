@@ -9,6 +9,7 @@ against app.py (which imports annotate.py to wire its UI button).
 """
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -174,6 +175,37 @@ def estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
     if not p:
         return 0.0
     return (in_tok * p["input"] + out_tok * p["output"]) / 1_000_000
+
+
+def render_cost_html(model: str = "—", in_tok: int = 0, out_tok: int = 0) -> str:
+    """API-usage card (model, input/output tokens, estimated cost). Shared by the
+    carousel and the interactive reader."""
+    cost = estimate_cost(model, in_tok, out_tok)
+    cap = MODEL_CONTEXT.get(model)
+    if cap:
+        pct = max(0, min(100, int(in_tok / cap * 100))) if in_tok else 0
+        # Colour the bar amber >70% / red >90% so over-budget runs are visible.
+        bar_class = "cost-bar"
+        if pct >= 90:
+            bar_class += " cost-bar-red"
+        elif pct >= 70:
+            bar_class += " cost-bar-amber"
+        input_row = (
+            f'<div class="cost-row"><span>Input</span>'
+            f'<span>{in_tok:,} / {cap:,} tok</span></div>'
+            f'<div class="cost-meter"><div class="{bar_class}" style="width:{pct}%"></div></div>'
+        )
+    else:
+        input_row = f'<div class="cost-row"><span>Input</span><span>{in_tok:,} tok</span></div>'
+    return (
+        '<div class="cost-card">'
+        '<div class="cost-title">🪙 API Usage</div>'
+        f'<div class="cost-row"><span>Model</span><span>{html.escape(model or "—")}</span></div>'
+        f'{input_row}'
+        f'<div class="cost-row"><span>Output</span><span>{out_tok:,} tok</span></div>'
+        f'<div class="cost-row cost-total"><span>Cost</span><span>${cost:.4f}</span></div>'
+        '</div>'
+    )
 
 
 # -----------------------------------------------------------------------------

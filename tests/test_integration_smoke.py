@@ -1,18 +1,21 @@
 """End-to-end pipeline smoke against a real arXiv PDF, minus the LLM call.
 
-Network-gated: set RUN_NET_SMOKE=1 to run. Verifies fetch -> block extraction
--> page rasterisation -> manifest -> (faked annotations) -> layout ->
-highlight resolution -> reader HTML, against a genuine paper.
+Network-gated: set RUN_NET_SMOKE=1 to run. Verifies fetch -> page rasterisation
+-> region text extraction -> selection parse -> summary state -> reader HTML,
+against a genuine paper.
 """
-import json
 import os
 import time
 
-import fitz
 import pytest
 
 import annotate
 import core
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("RUN_NET_SMOKE"),
+    reason="network smoke test; set RUN_NET_SMOKE=1 to run",
+)
 
 
 def _fetch_with_retry(aid, tries=5):
@@ -30,13 +33,8 @@ def _fetch_with_retry(aid, tries=5):
             raise
     raise last
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("RUN_NET_SMOKE"),
-    reason="network smoke test; set RUN_NET_SMOKE=1 to run",
-)
 
-
-def test_real_paper_pipeline_without_llm(tmp_path, monkeypatch):
+def test_real_paper_region_pipeline_without_llm(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "CACHE_DIR", str(tmp_path))
     monkeypatch.setattr(annotate, "PNG_DIR", str(tmp_path / "pages"))
 
@@ -44,35 +42,23 @@ def test_real_paper_pipeline_without_llm(tmp_path, monkeypatch):
     pdf_bytes, meta = _fetch_with_retry(aid)
     assert pdf_bytes and meta and meta["Title"]
 
-    pages_meta, blocks = annotate.extract_blocks(pdf_bytes)
-    assert pages_meta and blocks
-
+    import fitz
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+        pages_meta = [{"page": i, "width": p.rect.width, "height": p.rect.height}
+                      for i, p in enumerate(pdf)]
     pngs = annotate.render_page_pngs(pdf_bytes, aid)
     assert len(pngs) == len(pages_meta)
     assert all(os.path.exists(p) for p in pngs)
 
-    manifest = annotate.build_manifest(blocks)
-    assert "p0_b" in manifest
+    # The top of page 0 (title/abstract) has text.
+    text = annotate.extract_region_text(pdf_bytes, 0, [0.1, 0.05, 0.9, 0.5])
+    assert len(text) > 20
 
-    # Fake an LLM response from two real text blocks; highlight their first word.
-    text_blocks = [b for b in blocks if b["kind"] == "text" and len(b["text"]) > 40][:2]
-    assert len(text_blocks) == 2
-    fake = {"annotations": [
-        {"block_id": tb["id"], "kind": "paragraph", "note": "key takeaway",
-         "keywords": [tb["text"].split()[0]]}
-        for tb in text_blocks
-    ]}
+    sel = annotate.parse_selection('{"page":0,"rect":[0.1,0.05,0.9,0.5]}', len(pages_meta))
+    assert sel is not None
 
-    valid_ids = {b["id"] for b in blocks}
-    cleaned = annotate.parse_annotations(json.dumps(fake), valid_ids)
-    assert len(cleaned) == 2
-
-    enriched = annotate.layout_annotations(cleaned, blocks, pages_meta)
-    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
-        annotate.resolve_highlights(pdf, enriched, blocks)
-    # at least one keyword should resolve to a highlight rect
-    assert sum(len(e["highlights"]) for e in enriched) >= 1
-
-    html = annotate.render_reader_html(pages_meta, annotate._png_urls(pngs), enriched)
-    assert "lr-box-1" in html and "lr-box-2" in html
-    assert "lr-page-img" in html
+    state = {"title": meta["Title"], "authors": meta["Authors"], "pages_meta": pages_meta,
+             "pngs": pngs, "summaries": [], "in_tok": 0, "out_tok": 0, "model": "grok-4.3"}
+    state = annotate.append_summary(state, sel, text, "plain summary", 100, 40)
+    html = annotate.render_reader(state)
+    assert "lr-box-1" in html and "lr-drawlayer" in html
