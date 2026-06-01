@@ -1127,7 +1127,7 @@ body.lr-mod .lr-drawlayer { cursor: grab; }   /* ⌘/Ctrl held → pan affordanc
 
 MATHJAX_HEAD = r"""
 <link rel="icon" type="image/png" sizes="32x32" href="/gradio_api/file=static/favicon-32.png">
-<link rel="apple-touch-icon" sizes="192x192" href="/gradio_api/file=static/icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/gradio_api/file=static/icon-512.png">
 <link rel="manifest" href="/gradio_api/file=static/manifest.webmanifest">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
