@@ -542,24 +542,24 @@ CSS = """
     width: 100% !important;
     margin: 0 auto !important;
     padding: 1em 2em !important;
-    font-size: 11px !important;   /* base text size; em-based content scales with it */
+    font-size: 11.5px !important;   /* base text size; em-based content scales with it */
 }
 /* gr.HTML areas inherit the theme's larger font-size; force the small base so
    the carousel cards + reader scale down (their em sizing then follows). */
-#output, #reader { font-size: 11px !important; }
+#output, #reader { font-size: 11.5px !important; }
 /* The theme sizes the .prose wrapper inside gr.HTML, so em-based sizes balloon off
    ~16px. Pin the visible text in explicit px (id-scoped !important wins). */
-#tagline { font-size: 17px !important; }
-#output .paper-title { font-size: 19px !important; }
-#output .hook { font-size: 17px !important; line-height: 1.4 !important; }
-#output .card-emoji { font-size: 19px !important; }
-#output .card h3 { font-size: 17px !important; }
-#output .card p { font-size: 14.5px !important; }
-#output .card-bullets, #output .card-bullets li { font-size: 14px !important; }
-#output .paper-meta p, #output .trunc-banner { font-size: 13.5px !important; }
-#reader .lr-title { font-size: 18px !important; }
-#reader .lr-authors, #reader .lr-hint { font-size: 13px !important; }
-#reader .lr-bullets, #reader .lr-bullets li { font-size: 14px !important; }
+#tagline { font-size: 17.5px !important; }
+#output .paper-title { font-size: 20px !important; }
+#output .hook { font-size: 17.5px !important; line-height: 1.4 !important; }
+#output .card-emoji { font-size: 20px !important; }
+#output .card h3 { font-size: 17.5px !important; }
+#output .card p { font-size: 15px !important; }
+#output .card-bullets, #output .card-bullets li { font-size: 14.5px !important; }
+#output .paper-meta p, #output .trunc-banner { font-size: 14px !important; }
+#reader .lr-title { font-size: 18.5px !important; }
+#reader .lr-authors, #reader .lr-hint { font-size: 13.5px !important; }
+#reader .lr-bullets, #reader .lr-bullets li { font-size: 14.5px !important; }
 
 /* Force a clean, highly-legible font across the whole app, including injected HTML. */
 .gradio-container,
@@ -576,59 +576,65 @@ CSS = """
 }
 #topbar .prose h1 { margin: 0; font-size: 1.6em; }
 
-/* Right rail: Model dropdown + API-usage card, fixed like the Recent left rail. */
-#right-rail {
-    position: fixed;
-    top: 116px;
-    right: 0;
-    width: 240px;
-    max-height: calc(100vh - 136px);
-    overflow-y: auto;
-    padding: 0 0.9em 1em 0.6em;
-    z-index: 20;
+/* Search row: URL pill grows, model picker pinned to the right end. */
+#search-row {
+    width: 100%;
     display: flex;
-    flex-direction: column;
-    gap: 0.7em;
+    align-items: center;
+    gap: 0.6em;
+    flex-wrap: nowrap;
 }
-#right-rail > * { width: 100%; }
-#provider-slot { width: 100%; }
+#search-row > * { min-width: 0; }
+#provider-slot { flex: 0 0 auto; }
 #topbar > * { min-width: 0; }
-/* Narrow screens: no room for two fixed rails. Hide the (non-critical) Recent
-   rail and dock the Model/Usage rail into normal flow as a top config bar so
-   the model picker stays usable and can never overlap the content. */
-@media (max-width: 1139px) {
-    #recent-papers { display: none; }
-    #right-rail {
-        position: static;
-        width: auto;
-        max-width: 760px;
-        max-height: none;
-        overflow: visible;
-        margin: 0.5em auto 0 auto;
-        padding: 0 1em;
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 0.7em;
-    }
-    #right-rail > * { width: auto; flex: 1 1 240px; min-width: 0; }
-    #provider-slot { width: auto; }
+
+/* Model dropdown styled as a pill matching the URL bar. Two ids (#center-stack
+   #provider-slot) so it outranks the centre-stack `.block` transparency rule
+   and keeps its white pill background + border. */
+#center-stack #provider-slot {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 28px !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    height: 44px !important;        /* match the URL bar height exactly */
+    min-height: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+}
+/* hide the empty (show_label=False) label so it adds no height */
+#provider-slot label, #provider-slot .label-wrap { display: none !important; }
+#provider-slot .wrap,
+#provider-slot .wrap-inner,
+#provider-slot input,
+#provider-slot [role="combobox"] {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 13px !important;       /* smaller than the URL text so it fits the chip */
+    min-height: 0 !important;
+}
+#provider-slot .wrap, #provider-slot .wrap-inner { width: 100%; padding: 0 !important; }
+#provider-slot input,
+#provider-slot [role="combobox"] {
+    padding: 12px 32px 12px 18px !important;  /* match the URL bar's 12px vertical, room for caret */
 }
 
 /* ---- Right-rail paper actions (Open PDF / ArXiv Page / Zotero) ---- */
 #paper-actions:empty { display: none; }
 .sidebar-action-row { display: flex; flex-direction: column; gap: 0.5em; }
-.sidebar-action-row .action-btn { width: 100%; justify-content: flex-start; }
+.sidebar-action-row .action-btn { width: 100%; justify-content: flex-start; text-align: left; }
+/* Keep the label left-aligned even when it wraps to a second line. */
+.sidebar-action-row .action-btn .action-icon { flex: 0 0 auto; }
 
-/* Make room for the dropdown caret on the right edge of the value box. */
-#provider-slot input,
-#provider-slot select,
-#provider-slot .wrap-inner,
-#provider-slot [role="combobox"] {
-    padding-right: 32px !important;
+/* ---- API-usage panel: pinned to the bottom-left corner of the viewport ---- */
+#cost-panel {
+    position: fixed;
+    left: 14px;
+    bottom: 14px;
+    width: 220px;
+    z-index: 20;
 }
-
-/* ---- Cost panel (top-right sidebar chip) ---- */
 .cost-card {
     background: #fff;
     border: 1px solid #e5e7eb;
@@ -663,17 +669,30 @@ CSS = """
     display: flex; flex-direction: column; align-items: center;
     margin: 0.5em auto 1em auto; max-width: 1100px; width: 100%;
 }
+/* Strip Gradio's white component cards so the URL pill, model pill, button and
+   toggle sit directly on the page background. The #provider-slot pill keeps its
+   own white background via the higher-specificity id rule above. */
+#center-stack .block,
+#center-stack .form {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
 #tagline { color: #555; margin-bottom: 1.4em; font-size: 1.5em; text-align: center; font-weight: 500; }
 #url-box textarea {
-    font-size: 14px !important;
+    font-size: 14.5px !important;
     padding: 12px 18px !important;
     border-radius: 28px !important;
+    box-shadow: none !important;          /* drop the drop-shadow around the bar */
 }
+#url-box textarea:focus { box-shadow: none !important; }
 #url-box { width: 100%; }
 #generate-row { justify-content: center; margin-top: 1em; gap: 0.6em; }
-#generate-row button { font-size: 13px !important; }
+#generate-row button { font-size: 15.5px !important; }
 #force-row { justify-content: center; margin-top: 0.5em; }
-#force-toggle { color: #6b7280; font-size: 0.9em; }
+#force-toggle { color: #6b7280; }
+#force-toggle label,
+#force-toggle span { font-size: 13.5px !important; }
 
 /* ---- Status + output ---- */
 #status {
@@ -727,13 +746,15 @@ CSS = """
 .cost-bar-amber { background: #f59e0b; }
 .cost-bar-red   { background: #ef4444; }
 
-/* ---- Recent papers (collapsible left rail) ---- */
-#recent-papers {
+/* ---- Left rail: fixed sidebar holding Recent + paper action links ---- */
+#left-rail {
     position: fixed;
     top: 116px;                 /* sit below the LitRead title row */
     left: 0;
     width: 240px;
-    max-height: calc(100vh - 136px);
+    /* Stop short of the bottom so the rail never collides with the fixed
+       bottom-left API-usage panel (#cost-panel). */
+    max-height: calc(100vh - 290px);
     overflow-y: auto;
     overflow-x: hidden;
     padding: 1em 0.9em 1em 1em;
@@ -745,22 +766,22 @@ CSS = """
     box-shadow: 1px 0 4px rgba(0,0,0,0.03);
     transition: width 0.2s ease, padding 0.2s ease;
 }
-/* Collapse / expand chevron (glyph supplied by ::before per state). */
-.recent-toggle {
-    position: absolute;
-    top: 0.55em; right: 0.5em;
-    width: 26px; height: 26px;
-    border: none; background: none; cursor: pointer;
-    color: #9ca3af; font-size: 1.2em; line-height: 1;
-    border-radius: 7px; padding: 0;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s, color 0.15s;
+
+/* ---- Right rail: fixed sidebar holding the paper action buttons ---- */
+#actions-rail {
+    position: fixed;
+    top: 116px;
+    right: 0;
+    width: 240px;
+    max-height: calc(100vh - 136px);
+    overflow-y: auto;
+    padding: 1em 1em 1em 0.9em;
+    z-index: 20;
 }
-.recent-toggle:hover { background: #eef2ff; color: #6366f1; }
-body:not(.lr-rail-collapsed) .recent-toggle::before { content: '‹'; }
-body.lr-rail-collapsed .recent-toggle::before { content: '›'; }
-.recent-collapsed-icon { display: none; font-size: 1.35em; cursor: pointer; margin-top: 0.3em; text-align: center; }
-body.lr-rail-collapsed .recent-collapsed-icon { display: block; }
+/* While empty (no paper loaded) the inner HTML is hidden; don't let the empty
+   rail swallow clicks in the right gutter. */
+#actions-rail:has(#paper-actions:empty) { pointer-events: none; }
+
 .recent-header {
     font-size: 0.85em;
     font-weight: 600;
@@ -769,7 +790,6 @@ body.lr-rail-collapsed .recent-collapsed-icon { display: block; }
     letter-spacing: 0.04em;
     margin-bottom: 0.6em;
     padding-left: 0.2em;
-    padding-right: 1.8em;   /* clear the toggle button */
 }
 .recent-empty-msg {
     font-size: 0.8em;
@@ -806,24 +826,17 @@ body.lr-rail-collapsed .recent-collapsed-icon { display: block; }
     margin-top: 0.2em;
     font-family: ui-monospace, "SF Mono", Menlo, monospace !important;
 }
-/* Collapsed: shrink to a thin strip, hide the body, centre the toggle. */
-body.lr-rail-collapsed #recent-papers {
-    width: 46px !important;
-    padding: 0.5em 0 !important;
-    background: #f3f4f6;
-    border-right: 1px solid #e5e7eb;
-    border-radius: 0 10px 10px 0;
-    box-shadow: 1px 0 3px rgba(0,0,0,0.04);
+/* Narrow screens: no room for the fixed side rails, so hide them. The model
+   picker lives inline beside the URL bar, so it stays usable at every width. */
+@media (max-width: 1139px) {
+    #left-rail, #actions-rail { display: none; }
 }
-body.lr-rail-collapsed .recent-body { display: none; }
-/* In the thin strip the toggle flows at the top-centre (no fragile offsets). */
-body.lr-rail-collapsed .recent-toggle { position: static; margin: 0 auto 0.2em auto; }
 
-/* Centre the content and reserve room on BOTH sides for the fixed rails (Recent
-   left, Model/Usage right) so neither overlaps. The 560px gutter = two 240px
-   rails + comfortable gaps that survive the vertical scrollbar (100vw includes
-   it, the fixed rails sit inside it). Below 1140px the rails leave the fixed
-   layout (see the right-rail dock rule above), so content uses full width. */
+/* Centre the content and reserve room on BOTH sides so it never slides under the
+   fixed left rail. Symmetric 560px gutters keep the layout balanced and the
+   left gutter (280px) clears the 240px rail with room to spare. Below 1140px the
+   rail leaves the fixed layout (see the narrow-screen dock rule above), so
+   content uses full width. */
 @media (min-width: 1140px) {
     #center-stack, #status, #output, #reader {
         margin-left: auto !important;
@@ -1013,8 +1026,14 @@ img.recent-push { width: 0; height: 0; }
 /* Hidden bridge components the drag/delete JS drives. */
 #lr-selection, #lr-summarize, #lr-delete, #lr-delete-btn { display: none !important; }
 /* Transparent layer over each page that captures the rubber-band drag. */
-.lr-drawlayer { position: absolute; inset: 0; cursor: crosshair; z-index: 2; }
-body.lr-mod .lr-drawlayer { cursor: grab; }   /* ⌘/Ctrl held → pan affordance */
+.lr-drawlayer { position: absolute; inset: 0; cursor: grab; z-index: 2; }   /* plain drag pans */
+/* ⌘/Ctrl held → "+" crosshair everywhere over the reader so you can see you're
+   in selection mode (overrides the grab/pointer cursors of children). */
+body.lr-mod #reader,
+body.lr-mod .lr-page,
+body.lr-mod .lr-drawlayer,
+body.lr-mod .lr-sel,
+body.lr-mod .lr-pending-box { cursor: crosshair !important; }
 .lr-rubber {
     position: absolute;
     border: 1.5px dashed #6366f1;
@@ -1133,7 +1152,7 @@ body.lr-mod .lr-drawlayer { cursor: grab; }   /* ⌘/Ctrl held → pan affordanc
     text-decoration-color: #6366f1;
     text-underline-offset: 2px;
 }
-#reader .lr-note-title { font-size: 14px !important; }
+#reader .lr-note-title { font-size: 14.5px !important; }
 .lr-note-text { color: #374151; line-height: 1.45; font-size: 0.98em; }
 .lr-note-empty { color: #9ca3af; font-style: italic; font-size: 0.9em; padding: 0.4em 0.2em; }
 .lr-empty { color: #9ca3af; font-style: italic; text-align: center; padding: 2em 0; }
@@ -1233,24 +1252,7 @@ window.LITREAD_RECENT = {
       lst += '</div>';
       inner = lst;
     }
-    box.innerHTML =
-      '<button type="button" class="recent-toggle" aria-label="Toggle recent panel" ' +
-        'title="Collapse / expand" onclick="window.LITREAD_RECENT.toggle()"></button>' +
-      '<div class="recent-collapsed-icon" title="Expand" ' +
-        'onclick="window.LITREAD_RECENT.toggle()">📚</div>' +
-      '<div class="recent-body">' + inner + '</div>';
-  },
-  CKEY: 'litread.recent.collapsed',
-  isCollapsed: function() {
-    try { return localStorage.getItem(this.CKEY) === '1'; } catch (e) { return false; }
-  },
-  applyCollapsed: function() {
-    document.body.classList.toggle('lr-rail-collapsed', this.isCollapsed());
-  },
-  toggle: function() {
-    var next = !this.isCollapsed();
-    try { localStorage.setItem(this.CKEY, next ? '1' : '0'); } catch (e) {}
-    this.applyCollapsed();
+    box.innerHTML = inner;
   },
   load: function(aid) {
     // Fill the URL bar only; user decides whether to generate.
@@ -1266,7 +1268,6 @@ function __mountRecent() {
   if (!document.getElementById('recent-papers')) {
     setTimeout(__mountRecent, 300); return;
   }
-  window.LITREAD_RECENT.applyCollapsed();
   window.LITREAD_RECENT.render();
 }
 if (document.readyState === 'loading') {
@@ -1318,10 +1319,11 @@ window.lrLayoutNotes = function() {
   });
 };
 
-// ---- Interactive reader: drag to summarise; Cmd/Ctrl+drag to add regions ----
-// Plain drag -> one-region summary. Cmd/Ctrl+drag -> add a pending region (amber
-// dashed box); the toolbar's "Summarise" combines all pending regions into one
-// annotation. Submits send {regions:[{page,rect}, ...]} to #lr-selection.
+// ---- Interactive reader: Cmd/Ctrl+drag to select regions; plain drag pans ----
+// Cmd/Ctrl+drag -> add a pending region (amber dashed box); the toolbar's
+// "Summarise" combines all pending regions into one annotation. Plain drag pans
+// and plain wheel zooms (no modifier). Submits send {regions:[{page,rect}, ...]}
+// to #lr-selection.
 (function() {
   var pending = [];   // [{page, rect, el}]
 
@@ -1387,7 +1389,7 @@ window.lrLayoutNotes = function() {
 
     layer.addEventListener('mousedown', function(e) {
       if (e.button !== 0) return;
-      if (e.metaKey || e.ctrlKey) return;   // ⌘/Ctrl+drag pans the page (handled separately)
+      if (!(e.metaKey || e.ctrlKey)) return;   // select only with ⌘/Ctrl; plain drag pans (handled separately)
       var r = layer.getBoundingClientRect();
       start = { x: e.clientX - r.left, y: e.clientY - r.top };
       rubber = document.createElement('div');
@@ -1474,26 +1476,37 @@ window.lrLayoutNotes = function() {
   }
   hook();
 
-  // ---- Cmd/Ctrl + wheel zooms the page under the cursor (also trackpad pinch,
-  // which fires wheel with ctrlKey). Page width scales via --lr-z; the wrap
-  // scrolls horizontally. Coords stay valid (drag math is % of live size). ----
+  // ---- Wheel zooms the page under the cursor (no modifier needed; trackpad
+  // pinch also fires wheel). Wheel outside a page scrolls normally. Page width
+  // scales via --lr-z; the wrap scrolls horizontally. Coords stay valid (drag
+  // math is % of live size). ----
   document.addEventListener('wheel', function(e) {
-    if (!(e.ctrlKey || e.metaKey)) return;
     var page = e.target && e.target.closest ? e.target.closest('.lr-page') : null;
     if (!page) return;
     e.preventDefault();
-    var z = parseFloat(page.style.getPropertyValue('--lr-z')) || 1;
-    z = Math.min(4, Math.max(1, z - e.deltaY * 0.0025));
-    page.style.setProperty('--lr-z', z);
+    var z0 = parseFloat(page.style.getPropertyValue('--lr-z')) || 1;
+    var z1 = Math.min(4, Math.max(1, z0 - e.deltaY * 0.0025));
+    if (z1 === z0) return;
+    // Anchor the zoom to the cursor: keep the content point under the pointer
+    // fixed instead of growing from the top-left (which looks like the page
+    // scrolling). The page scales by z1/z0, so shift the scroll by the cursor's
+    // offset into the page times (ratio - 1).
+    var ratio = z1 / z0;
+    var rect = page.getBoundingClientRect();
+    var dx = e.clientX - rect.left, dy = e.clientY - rect.top;
+    page.style.setProperty('--lr-z', z1);
+    var wrap = page.closest('.lr-pagewrap');
+    if (wrap) wrap.scrollLeft += dx * (ratio - 1);
+    window.scrollBy(0, dy * (ratio - 1));
     if (window.lrLayoutNotes) window.lrLayoutNotes();
   }, { passive: false });
 
-  // ---- ⌘/Ctrl + drag pans the page: grab to scroll a zoomed page (horizontal
-  // within its wrap, vertical via the window). ⌘/Ctrl makes the rubber-band drag
-  // bail (see attach), so the two never fight. ----
+  // ---- Plain drag pans the page: grab to scroll a zoomed page (horizontal
+  // within its wrap, vertical via the window). ⌘/Ctrl makes the rubber-band
+  // select run instead (see attach), so the two never fight. ----
   var pan = null;
   document.addEventListener('mousedown', function(e) {
-    if (e.button !== 0 || !(e.metaKey || e.ctrlKey)) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey) return;
     var page = e.target && e.target.closest ? e.target.closest('.lr-page') : null;
     if (!page) return;
     pan = { x: e.clientX, y: e.clientY, wrap: page.closest('.lr-pagewrap') };
@@ -1537,41 +1550,50 @@ def build_ui() -> gr.Blocks:
     initial_cost = render_cost_html(list(PROVIDERS.values())[0]["model"])
 
     with gr.Blocks(title="LitRead") as demo:
-        # Left rail — JS reads localStorage and renders a stacked list of
-        # recent paper titles. Hidden on narrow screens via media query.
-        gr.HTML(value="", elem_id="recent-papers")
+        # Left rail — Recent papers. Fixed sidebar; JS renders the recent list
+        # into #recent-papers from localStorage.
+        with gr.Column(elem_id="left-rail", min_width=240):
+            gr.HTML(value="", elem_id="recent-papers")
 
-        # ---- Right rail: Model picker + API-usage card (fixed, like Recent) ----
-        with gr.Column(elem_id="right-rail"):
-            provider = gr.Dropdown(
-                choices=list(PROVIDERS.keys()),
-                value=list(PROVIDERS.keys())[0],
-                label="Model",
-                container=True,
-                elem_id="provider-slot",
-                filterable=False,
-                allow_custom_value=False,
-                interactive=True,
-            )
-            cost = gr.HTML(value=initial_cost, elem_id="cost-panel")
+        # Right rail — quick action links (Open PDF / ArXiv / Zotero), populated
+        # after a paper loads. Hidden while empty.
+        with gr.Column(elem_id="actions-rail", min_width=240):
             paper_actions = gr.HTML(value="", elem_id="paper-actions")
+
+        # API-usage panel, pinned to the bottom-left corner of the viewport.
+        cost = gr.HTML(value=initial_cost, elem_id="cost-panel")
 
         # ---- Top bar: title ----
         with gr.Row(elem_id="topbar"):
             gr.Markdown("# 📚 LitRead")
 
-        # ---- Centered Google-style URL bar + button ----
+        # ---- Centered Google-style URL bar + inline model picker ----
         with gr.Column(elem_id="center-stack"):
             gr.Markdown(
                 "Paste an ArXiv link → get a captivating bite-sized summary.",
                 elem_id="tagline",
             )
-            url = gr.Textbox(
-                placeholder="https://arxiv.org/abs/2305.10601",
-                show_label=False,
-                container=False,
-                elem_id="url-box",
-            )
+            # URL pill grows to fill; the model picker sits at the right end.
+            with gr.Row(elem_id="search-row"):
+                url = gr.Textbox(
+                    placeholder="https://arxiv.org/abs/2305.10601",
+                    show_label=False,
+                    container=False,
+                    elem_id="url-box",
+                    scale=5,
+                )
+                provider = gr.Dropdown(
+                    choices=list(PROVIDERS.keys()),
+                    value=list(PROVIDERS.keys())[0],
+                    show_label=False,
+                    container=True,
+                    elem_id="provider-slot",
+                    filterable=False,
+                    allow_custom_value=False,
+                    interactive=True,
+                    scale=1,
+                    min_width=180,
+                )
             with gr.Row(elem_id="generate-row"):
                 generate_btn = gr.Button("✨ Generate Carousel + Reader", variant="primary")
             with gr.Row(elem_id="force-row"):

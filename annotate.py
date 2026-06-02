@@ -184,7 +184,7 @@ def _pct(v: float) -> str:
     return f"{round(v * 100, 2)}%"
 
 
-def _placeholder(msg: str = "Load a paper, then drag a box over any region to summarise it.") -> str:
+def _placeholder(msg: str = "Load a paper, then ⌘/Ctrl + drag a box over any region to summarise it.") -> str:
     return f'<div class="lr-empty">{html.escape(msg)}</div>'
 
 
@@ -247,9 +247,9 @@ def render_reader(state: Optional[Dict[str, Any]]) -> str:
     parts = [
         f'<div class="lr-header"><h2 class="lr-title">{title}</h2>'
         f'<p class="lr-authors">{authors}</p></div>',
-        '<div class="lr-hint">Drag a box to select a region — drag several, then click '
-        '<b>Summarise</b> to combine them into one annotation (even across pages). Click a queued '
-        'box to remove it. <b>⌘/Ctrl</b> + scroll to zoom a page; <b>⌘/Ctrl</b> + drag to pan.</div>',
+        '<div class="lr-hint"><b>⌘/Ctrl</b> + drag a box to select a region — select several, then '
+        'click <b>Summarise</b> to combine them into one annotation (even across pages). Click a '
+        'queued box to remove it. Scroll to zoom a page; drag to pan.</div>',
     ]
 
     for pm in state["pages_meta"]:
@@ -314,7 +314,7 @@ def load_reader(url: str, provider: str, force: bool = False):
         yield _placeholder("Paste a valid ArXiv URL to load the PDF."), None, ""
         return
 
-    yield _placeholder(f"Loading PDF for {aid} — drag a box once it appears…"), None, ""
+    yield _placeholder(f"Loading PDF for {aid} — ⌘/Ctrl + drag a box once it appears…"), None, ""
     pdf_bytes: Optional[bytes] = None
     meta: Optional[Dict[str, Any]] = None
     for attempt in range(MAX_FETCH_RETRIES):
