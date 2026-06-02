@@ -128,8 +128,7 @@ model's context window + your wallet).
 ├── .env              # (gitignored) your real keys
 ├── .gitignore
 ├── claude.md         # Original project brief
-├── README.md         # You are here
-└── DEPLOY.md         # Online-deployment recipes
+└── README.md         # You are here
 ```
 
 ## Code walkthrough

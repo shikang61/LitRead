@@ -38,6 +38,7 @@ cat > "$PLIST" <<PLISTEOF
     <dict>
         <key>PORT</key><string>$PORT</string>
         <key>LITREAD_CACHE_DIR</key><string>$REPO/cache</string>
+        <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
@@ -58,4 +59,4 @@ echo "Manage:"
 echo "  Update:  bash deploy/update-macmini.sh   (pull + uv sync + restart)"
 echo "  Restart: launchctl kickstart -k gui/$(id -u)/$LABEL"
 echo "  Stop:    launchctl bootout gui/$(id -u)/$LABEL"
-echo "Next: expose it — bash deploy/expose-tailscale.sh   (or expose-cloudflare.sh)"
+echo "Next: expose it — bash deploy/expose-tailscale.sh"

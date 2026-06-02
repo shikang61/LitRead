@@ -3,7 +3,7 @@
 # and restart the launchd service so the new code is loaded.
 # Run this from the repo on the Mac mini:  bash deploy/update-macmini.sh
 #
-# The Tailscale/Cloudflare tunnel needs NO refresh — it proxies to the same
+# The Tailscale tunnel needs NO refresh — it proxies to the same
 # local port, so it serves the new version as soon as the service restarts.
 set -euo pipefail
 
@@ -22,8 +22,10 @@ if [ ! -x "$PY" ]; then
   exit 1
 fi
 
-echo "==> git pull"
+echo "==> git stash, pull, restore"
+git stash
 git pull --ff-only
+git stash pop
 
 echo "==> uv pip install -r requirements.txt"
 uv pip install --python "$PY" -r requirements.txt

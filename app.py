@@ -1659,8 +1659,8 @@ if __name__ == "__main__":
         server_name="0.0.0.0",
         server_port=int(os.environ.get("PORT", 7860)),
         ssr_mode=False,  # SSR breaks streaming generators on HF Spaces
-        favicon_path="static/favicon-32.png",
-        allowed_paths=["static", core.CACHE_DIR],
+        favicon_path=os.path.join(os.path.dirname(__file__), "static/favicon-32.png"),
+        allowed_paths=[os.path.join(os.path.dirname(__file__), "static"), core.CACHE_DIR],
         theme=gr.themes.Soft(
             text_size=gr.themes.sizes.text_lg,
             font=[
